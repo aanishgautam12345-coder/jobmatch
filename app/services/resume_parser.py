@@ -111,6 +111,10 @@ def parse_resume_with_llm(resume_text: str) -> dict:
 
     Returns:
         Dict with structured profile fields.
+
+    Raises:
+        ValueError: If the API key is missing, the response is empty,
+            or parsing fails.
     """
     settings = get_settings()
     if not settings.openai_api_key:
@@ -121,16 +125,21 @@ def parse_resume_with_llm(resume_text: str) -> dict:
     # Truncate very long resumes to stay within context limits
     truncated = resume_text[:6000]
 
-    response = client.responses.create(
-        model=settings.openai_model,
-        instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
-        input=EXTRACTION_PROMPT + truncated,
-        max_output_tokens=1500,
-    )
+    try:
+        response = client.responses.create(
+            model=settings.openai_model,
+            instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
+            input=EXTRACTION_PROMPT + truncated,
+            max_output_tokens=1500,
+        )
+    except Exception:
+        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
 
-    raw = response.output_text.strip()
+    raw_output = getattr(response, 'output_text', None)
+    if not isinstance(raw_output, str) or not raw_output.strip():
+        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
 
-    # Clean up common LLM output issues
+    raw = raw_output.strip()
     raw = raw.strip("`")
     if raw.startswith("json"):
         raw = raw[4:]
@@ -143,26 +152,39 @@ def parse_resume_with_llm(resume_text: str) -> dict:
 
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"LLM returned invalid JSON: {e}\nRaw output: {raw[:500]}")
+    except json.JSONDecodeError:
+        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
 
     return _normalize_parsed(parsed)
 
 
 def _normalize_parsed(data: dict) -> dict:
     """Clean and normalize the LLM's output into consistent types."""
-    # Ensure skills is a flat list of lowercase strings
+
+    # Ensure skills is a flat list of lowercase strings, remove blanks and duplicates
     skills = data.get("skills", [])
     if isinstance(skills, list):
-        skills = [str(s).strip().lower() for s in skills if s]
+        seen = set()
+        deduped = []
+        for s in skills:
+            cleaned = str(s).strip().lower()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                deduped.append(cleaned)
+        skills = deduped
     else:
         skills = []
 
-    # Ensure experience_years is an int
+    # Ensure experience_years is a non-negative int
     exp_years = data.get("experience_years")
     if exp_years is not None:
         try:
             exp_years = int(float(exp_years))
+            if exp_years < 0 or exp_years > 50:
+                exp_years = None
         except (ValueError, TypeError):
             exp_years = None
 
@@ -170,7 +192,6 @@ def _normalize_parsed(data: dict) -> dict:
     exp_level = data.get("experience_level", "").lower().strip() if data.get("experience_level") else None
     valid_levels = ["junior", "mid", "senior", "lead", "principal"]
     if exp_level not in valid_levels:
-        # Infer from years if the LLM didn't give a valid level
         if exp_years is not None:
             if exp_years <= 2:
                 exp_level = "junior"
@@ -183,12 +204,17 @@ def _normalize_parsed(data: dict) -> dict:
         else:
             exp_level = None
 
-    # Ensure locations is a list
+    # Ensure preferred_locations is a list of non-blank strings
     locations = data.get("preferred_locations", [])
     if isinstance(locations, list):
-        locations = [str(loc).strip() for loc in locations if loc]
+        locations = [str(loc).strip() for loc in locations if loc and str(loc).strip()]
     else:
         locations = []
+
+    # Validate work_history as a list
+    work_history = data.get("work_history", [])
+    if not isinstance(work_history, list):
+        work_history = []
 
     return {
         "full_name": data.get("full_name"),
@@ -201,7 +227,7 @@ def _normalize_parsed(data: dict) -> dict:
         "preferred_locations": locations,
         "education": data.get("education"),
         "career_interests": data.get("career_interests"),
-        "work_history": data.get("work_history", []),
+        "work_history": work_history,
     }
 
 

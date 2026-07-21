@@ -150,7 +150,12 @@ def generate_explanation(
             input=prompt,
             max_output_tokens=200,
         )
-        explanation = response.output_text.strip()
+        raw = getattr(response, 'output_text', None)
+        if not isinstance(raw, str) or not raw.strip():
+            logger.warning("LLM returned empty or invalid output. Using fallback.")
+            return _fallback_explanation(breakdown)
+
+        explanation = raw.strip()
 
         # Validate the explanation for hallucinated claims
         if validate:
@@ -168,14 +173,14 @@ def generate_explanation(
                     for issue in validation.issues:
                         logger.info(f"Validation issue (kept): {issue}")
 
-        # Cache the result (with size limit)
-        if len(_explanation_cache) < 256:
+        # Cache only non-empty explanations
+        if explanation.strip() and len(_explanation_cache) < 256:
             _explanation_cache[cache_key] = explanation
 
         return explanation
 
     except Exception as e:
-        logger.error(f"LLM explanation failed: {e}. Using fallback.")
+        logger.warning(f"OpenAI call failed ({type(e).__name__}). Using fallback.")
         return _fallback_explanation(breakdown)
 
 

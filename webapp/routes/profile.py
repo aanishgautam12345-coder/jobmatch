@@ -78,7 +78,7 @@ def upload_resume():
         pdf_bytes = file.read()
         extracted = process_resume(pdf_bytes)
         return jsonify({"success": True, "data": extracted})
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Failed to process resume: {str(e)}"}), 500
+    except ValueError:
+        return jsonify({"error": "Resume processing is temporarily unavailable. Please try again later."}), 400
+    except Exception:
+        return jsonify({"error": "Resume processing is temporarily unavailable. Please try again later."}), 500
