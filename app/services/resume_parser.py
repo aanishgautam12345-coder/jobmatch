@@ -14,7 +14,7 @@ from io import BytesIO
 from typing import Optional
 
 from openai import BadRequestError, OpenAI
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.config import get_settings
 
@@ -54,13 +54,13 @@ class ResumeExtraction(BaseModel):
     headline: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    skills: list[str] = []
+    skills: list[str] = Field(default_factory=list)
     experience_years: Optional[int] = None
     experience_level: Optional[str] = None
-    preferred_locations: list[str] = []
+    preferred_locations: list[str] = Field(default_factory=list)
     education: Optional[str] = None
     career_interests: Optional[str] = None
-    work_history: list[WorkHistoryEntry] = []
+    work_history: list[WorkHistoryEntry] = Field(default_factory=list)
 
     @field_validator(
         "full_name", "headline", "email", "phone", "education", "career_interests",
@@ -318,6 +318,29 @@ def _try_plain(client, model, input_text):
     )
 
 
+def _is_structured_output_unsupported(error: BadRequestError) -> bool:
+    """Check whether a BadRequestError indicates structured-output incompatibility.
+
+    Returns True only when the error clearly refers to an unsupported
+    structured-output parameter, format, or schema.  Unrelated 400 errors
+    (invalid input, content filter, etc.) return False.
+    """
+    hints = [
+        "unsupported parameter",
+        "structured outputs",
+        "json_schema",
+    ]
+    msg = (error.message or "").lower()
+    if any(h in msg for h in hints):
+        return True
+    body = error.body if isinstance(error.body, dict) else {}
+    err_body = body.get("error") or {}
+    err_msg = ((err_body.get("message") if isinstance(err_body, dict) else err_body) or "").lower()
+    if any(h in err_msg for h in hints):
+        return True
+    return False
+
+
 def _parse_response_json(raw_output):
     """Parse and validate JSON from LLM response text."""
     if not isinstance(raw_output, str) or not raw_output.strip():
@@ -343,7 +366,7 @@ def _parse_response_json(raw_output):
 
     try:
         extraction = ResumeExtraction.model_validate(parsed)
-    except Exception:
+    except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
         raise ResumeResponseError("Resume processing is temporarily unavailable. Please try again later.")
 
     return extraction.model_dump()
@@ -378,11 +401,14 @@ def parse_resume_with_llm(resume_text: str) -> dict:
     # Attempt 1: Structured outputs with JSON schema
     try:
         response = _try_structured(client, settings.openai_model, EXTRACTION_PROMPT + truncated)
-    except BadRequestError:
-        # Model does not support structured outputs — fallback to plain JSON
-        try:
-            response = _try_plain(client, settings.openai_model, EXTRACTION_PROMPT + truncated)
-        except Exception as e:
+    except BadRequestError as e:
+        if _is_structured_output_unsupported(e):
+            # Structured format not supported by this model — fallback to plain JSON
+            try:
+                response = _try_plain(client, settings.openai_model, EXTRACTION_PROMPT + truncated)
+            except Exception as fe:
+                raise ResumeProviderError("Resume processing is temporarily unavailable. Please try again later.") from fe
+        else:
             raise ResumeProviderError("Resume processing is temporarily unavailable. Please try again later.") from e
     except Exception as e:
         raise ResumeProviderError("Resume processing is temporarily unavailable. Please try again later.") from e

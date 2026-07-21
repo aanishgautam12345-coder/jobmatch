@@ -3,12 +3,14 @@
 All provider API calls use mocks — no real requests.
 """
 
+import io
 import json
 import pytest
 from unittest.mock import patch, MagicMock, call, PropertyMock
 from uuid import uuid4
 
 from openai import BadRequestError
+from pydantic import ValidationError
 
 import app.services.rag as rag_service
 from app.services.rag import generate_explanation
@@ -370,6 +372,74 @@ def test_unsupported_format_two_calls(mock_get_settings, mock_try_plain, mock_tr
 
 
 @patch("app.services.resume_parser._try_structured")
+@patch("app.services.resume_parser._try_plain")
+@patch("app.services.resume_parser.get_settings")
+def test_unrelated_bad_request_no_fallback(mock_get_settings, mock_try_plain, mock_try_structured):
+    """Unrelated BadRequestError (invalid input) must not trigger a fallback."""
+    mock_settings = MagicMock()
+    mock_settings.openai_api_key = "sk-test"
+    mock_settings.openai_model = "gpt-5.6-sol"
+    mock_get_settings.return_value = mock_settings
+
+    mock_try_structured.side_effect = BadRequestError(
+        "Invalid content: the input exceeds the maximum allowed length",
+        response=MagicMock(status_code=400),
+        body=None,
+    )
+
+    with pytest.raises(ResumeProviderError):
+        parse_resume_with_llm("Some resume text")
+    mock_try_structured.assert_called_once()
+    mock_try_plain.assert_not_called()
+
+
+@patch("app.services.resume_parser._try_structured")
+@patch("app.services.resume_parser._try_plain")
+@patch("app.services.resume_parser.get_settings")
+def test_unrelated_bad_request_generic_format_word(mock_get_settings, mock_try_plain, mock_try_structured):
+    """A 400 with the generic word 'format' must not trigger fallback."""
+    mock_settings = MagicMock()
+    mock_settings.openai_api_key = "sk-test"
+    mock_settings.openai_model = "gpt-5.6-sol"
+    mock_get_settings.return_value = mock_settings
+
+    mock_try_structured.side_effect = BadRequestError(
+        "Your request was malformed. Please check the format of your input.",
+        response=MagicMock(status_code=400),
+        body=None,
+    )
+
+    with pytest.raises(ResumeProviderError):
+        parse_resume_with_llm("Some resume text")
+    mock_try_structured.assert_called_once()
+    mock_try_plain.assert_not_called()
+
+
+@patch("app.services.resume_parser._try_structured")
+@patch("app.services.resume_parser._try_plain")
+@patch("app.services.resume_parser.get_settings")
+def test_unsupported_json_schema_via_error_body(mock_get_settings, mock_try_plain, mock_try_structured):
+    """Confirmed unsupported via error body triggers exactly one fallback."""
+    mock_settings = MagicMock()
+    mock_settings.openai_api_key = "sk-test"
+    mock_settings.openai_model = "gpt-5.6-sol"
+    mock_get_settings.return_value = mock_settings
+
+    mock_try_structured.side_effect = BadRequestError(
+        "Bad Request",
+        response=MagicMock(status_code=400),
+        body={"error": {"message": "The model does not support json_schema", "code": "unsupported_parameter"}},
+    )
+    mock_response = MagicMock()
+    mock_response.output_text = json.dumps({"skills": ["Python"]})
+    mock_try_plain.return_value = mock_response
+
+    parse_resume_with_llm("Some resume text")
+    mock_try_structured.assert_called_once()
+    mock_try_plain.assert_called_once()
+
+
+@patch("app.services.resume_parser._try_structured")
 @patch("app.services.resume_parser.get_settings")
 def test_authentication_failure_one_call(mock_get_settings, mock_try_structured):
     """Authentication failure makes one call, no fallback."""
@@ -715,16 +785,20 @@ def test_separate_model_instances_no_shared_defaults():
     r1 = ResumeExtraction()
     r2 = ResumeExtraction()
     r1.skills.append("python")
+    r1.preferred_locations.append("London")
+    r1.work_history.append(WorkHistoryEntry(title="Dev", company="Acme"))
     assert r2.skills == []
+    assert r2.preferred_locations == []
+    assert r2.work_history == []
 
 
 def test_text_field_rejects_object():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction(full_name={"first": "John"})
 
 
 def test_text_field_rejects_list():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction(full_name=["John", "Doe"])
 
 
@@ -734,17 +808,17 @@ def test_blank_text_becomes_none():
 
 
 def test_skill_rejects_dict():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"skills": [{"name": "python"}]})
 
 
 def test_skill_rejects_number():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"skills": [42]})
 
 
 def test_skill_rejects_bool():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"skills": [True]})
 
 
@@ -754,17 +828,17 @@ def test_skills_normalised_and_deduplicated():
 
 
 def test_location_rejects_dict():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"preferred_locations": [{"city": "London"}]})
 
 
 def test_location_rejects_number():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"preferred_locations": [42]})
 
 
 def test_location_rejects_bool():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"preferred_locations": [True]})
 
 
@@ -774,12 +848,12 @@ def test_locations_trimmed_and_deduplicated():
 
 
 def test_experience_years_true_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"experience_years": True})
 
 
 def test_experience_years_false_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction.model_validate({"experience_years": False})
 
 
@@ -813,12 +887,12 @@ def test_work_history_null_fields_accepted():
 
 
 def test_work_history_rejects_unknown_fields():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         WorkHistoryEntry(title="Dev", company="Acme", extra_field="bad")
 
 
 def test_model_rejects_unknown_fields():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ResumeExtraction(unknown_field="bad")
 
 
@@ -984,6 +1058,3 @@ def test_upload_resume_error_json_safe(mock_get_user, mock_process, client):
     assert "sk-" not in body
     assert "Traceback" not in body
     assert "test error" not in body
-
-
-import io  # noqa: E402 (needed by Flask endpoint tests)
