@@ -6,8 +6,8 @@ from flask_login import login_required, current_user
 from app.database import SessionLocal
 from app.models.user import UserProfile
 from app.services.embedding import build_profile_text, generate_embedding
-from app.services.resume_parser import process_resume
-from app.services.explanation_validator import (
+from app.services.resume_parser import (
+    process_resume,
     InvalidResumeError,
     ResumeConfigurationError,
     ResumeProviderError,
