@@ -16,7 +16,7 @@ discover relevant employment opportunities.
 | Frontend | Python + Flask (Jinja2 templates) |
 | Database | PostgreSQL 16 + pgvector |
 | Embeddings | BAAI/bge-base-en-v1.5 (768d) |
-| LLM | Groq free tier (Llama 3.1) |
+| LLM | OpenAI (GPT) |
 | Data Sources | Adzuna API + Reed API + We Work Remotely RSS |
 
 ---
@@ -50,8 +50,13 @@ This starts PostgreSQL 16 with the pgvector extension on port 5432.
 ### 4. Configure environment
 ```bash
 cp .env.example .env
-# Edit .env with your actual keys (Adzuna, Groq, etc.)
+# Edit .env with your actual keys (Adzuna, OpenAI, etc.)
 ```
+
+The LLM feature (RAG explanations + resume parsing) requires an OpenAI API key.
+- Set `OPENAI_API_KEY` in `.env` — get one at https://platform.openai.com/api-keys
+- Optionally set `OPENAI_MODEL` (default: `gpt-5.6-sol`)
+- ChatGPT subscriptions and OpenAI API billing are separate; the API key is not the same as a ChatGPT login.
 
 ### 5. Run database migrations
 ```bash

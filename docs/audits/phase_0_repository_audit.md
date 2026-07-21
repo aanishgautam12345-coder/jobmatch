@@ -57,7 +57,6 @@ JobMatch AI is a working prototype with a functional data pipeline, semantic sea
 | 34 | **Medium** | No Alembic `env.py` or `script.py.mako`. No migration infrastructure at all. | (missing) | Cannot create or run migrations. | Initialize Alembic. | Phase 1 |
 | 35 | **Medium** | `test_recommend.py` overwrites profile fields on every run (lines 74-83). Destructive to user edits. | `scripts/test_recommend.py:74-83` | Test script corrupts real user profiles. | Isolate test data. | Phase 8 |
 | 36 | **Low** | README.md references Streamlit as the frontend but the actual frontend is Flask/Jinja2. | `README.md:19` | Documentation out of date. | Update README. | Phase 8 |
-| 37 | **Low** | `langchain` and `langchain-groq` are in requirements but not used in any active code path. | `requirements.txt:33-35` | Unnecessary dependency bloat. | Remove or document planned use. | Phase 8 |
 | 38 | **Low** | `dashboard/` directory contains Streamlit code that appears superseded by `webapp/`. | `dashboard/` | Confusing codebase structure. | Archive or remove. | Phase 8 |
 | 39 | **Low** | No `__all__` in `app/services/__init__.py`, `app/processing/__init__.py`, `app/ingestion/__init__.py`. | Various `__init__.py` | Minor import hygiene. | Add `__all__` exports. | Phase 8 |
 | 40 | **Low** | Emoji usage in print statements (e.g., `print("✓ Done")`) may not render on all terminals. | Various scripts | Minor portability issue. | Use ASCII fallbacks or logging. | Phase 8 |
@@ -193,7 +192,7 @@ The following aspects of the current implementation are sound and should be pres
 
 1. **PostgreSQL is the only database.** No SQLite fallback for testing.
 2. **Embedding model is always available.** No fallback if sentence-transformers fails to load.
-3. **Groq API key is optional.** RAG falls back to templates, but resume parsing fails hard.
+3. **OpenAI API key is required.** RAG falls back to templates if unavailable, but resume parsing fails hard.
 4. **All jobs are English.** No language detection or multilingual support.
 5. **Salary is annual by default.** Non-annual salaries may be incorrectly compared.
 6. **One user = one profile.** No support for multiple profiles or career changes.

@@ -1,7 +1,7 @@
 """Test the RAG Explanation Engine.
 
 Runs the Recommendation Agent, then generates a grounded explanation for
-each top result using Groq — the "why this job" feature.
+each top result using OpenAI — the "why this job" feature.
 
 Usage:
     python -m scripts.test_explain
@@ -38,7 +38,7 @@ def main():
             return
 
         print(f"\nGenerating explanations for top {len(recommendations)} recommendations ...")
-        print("(This calls the Groq API — needs GROQ_API_KEY in your .env)\n")
+        print("(This calls the OpenAI API — needs OPENAI_API_KEY in your .env)\n")
 
         for rec in recommendations:
             job = db.query(Job).filter(Job.id == rec["job_id"]).first()

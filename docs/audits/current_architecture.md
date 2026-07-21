@@ -111,7 +111,7 @@ Recommendation Request
     │
     ├──► Build Prompt (facts only, no invention)
     │
-    ├──► Groq LLM (llama-3.1-8b, temp=0.3)
+    ├──► OpenAI (GPT, temp=0.3)
     │
     ├──► Cache Result
     │
@@ -164,8 +164,8 @@ users (1) ──── (1) user_profiles
 | Vector Extension | pgvector | 0.3.5 | Similarity search |
 | Embedding Model | BAAI/bge-base-en-v1.5 | — | 768d vectors |
 | Embedding Library | sentence-transformers | 3.1.0 | Model interface |
-| LLM Provider | Groq | — | Free tier API |
-| LLM Model | llama-3.1-8b-instant | — | Explanation generation |
+| LLM Provider | OpenAI | — | API |
+| LLM Model | gpt-5.6-sol (configurable) | — | Explanation generation |
 | Auth (API) | JWT (python-jose) | 3.3.0 | Token-based auth |
 | Auth (Web) | Flask-Login | 0.6.3 | Session-based auth |
 | Password Hashing | passlib (bcrypt) | 1.7.4 | Credential storage |

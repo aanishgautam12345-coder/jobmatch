@@ -44,7 +44,7 @@ page = st.sidebar.radio(
 st.sidebar.divider()
 st.sidebar.caption("Dissertation Project · JobMatch AI")
 st.sidebar.caption("Backend: FastAPI + PostgreSQL + pgvector")
-st.sidebar.caption("AI: sentence-transformers + Groq (Llama 3.1)")
+st.sidebar.caption("AI: sentence-transformers + OpenAI")
 
 
 # ── Route to the right page ──

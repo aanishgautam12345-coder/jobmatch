@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     # Reed.co.uk
     reed_api_key: str = ""
 
-    # Groq LLM
-    groq_api_key: str = ""
+    # OpenAI
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5.6-sol"
 
     # JWT Auth
     secret_key: str = "change-this-to-a-random-string"
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     embedding_dim: int = 768
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache

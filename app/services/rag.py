@@ -15,9 +15,8 @@ Pipeline:
 
 import hashlib
 import logging
-from functools import lru_cache
 
-from groq import Groq
+from openai import OpenAI
 
 from app.config import get_settings
 from app.models.job import Job
@@ -28,20 +27,20 @@ from app.services.explanation_validator import validate_explanation, ValidationR
 logger = logging.getLogger(__name__)
 
 
-_client: Groq | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> Groq:
-    """Lazily initialise the Groq client (free tier)."""
+def _get_client() -> OpenAI:
+    """Lazily initialise the OpenAI client."""
     global _client
     if _client is None:
         settings = get_settings()
-        if not settings.groq_api_key:
+        if not settings.openai_api_key:
             raise ValueError(
-                "GROQ_API_KEY is not set in .env. "
-                "Get a free key at https://console.groq.com/keys"
+                "OPENAI_API_KEY is not set in .env. "
+                "Get a key at https://platform.openai.com/api-keys"
             )
-        _client = Groq(api_key=settings.groq_api_key)
+        _client = OpenAI(api_key=settings.openai_api_key)
     return _client
 
 
@@ -116,7 +115,7 @@ def generate_explanation(
     profile: UserProfile,
     job: Job,
     breakdown: MatchBreakdown,
-    model: str = "llama-3.1-8b-instant",
+    model: str = "",
     validate: bool = True,
 ) -> str:
     """Generate a grounded, human-readable explanation for a job match.
@@ -128,7 +127,7 @@ def generate_explanation(
         profile: The user's profile.
         job: The recommended job.
         breakdown: The already-computed match score breakdown.
-        model: Groq model to use (free tier — llama-3.1-8b-instant is fast).
+        model: OpenAI model to use (defaults to settings.openai_model).
         validate: If True, validate the explanation for hallucinated claims.
 
     Returns:
@@ -140,20 +139,18 @@ def generate_explanation(
         return _explanation_cache[cache_key]
 
     prompt = build_explanation_prompt(profile, job, breakdown)
-
-    client = _get_client()
+    settings = get_settings()
+    model_name = model or settings.openai_model
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You explain job match results factually and concisely, using only the evidence given to you."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=200,
+        client = _get_client()
+        response = client.responses.create(
+            model=model_name,
+            instructions="You explain job match results factually and concisely, using only the evidence given to you.",
+            input=prompt,
+            max_output_tokens=200,
         )
-        explanation = response.choices[0].message.content.strip()
+        explanation = response.output_text.strip()
 
         # Validate the explanation for hallucinated claims
         if validate:

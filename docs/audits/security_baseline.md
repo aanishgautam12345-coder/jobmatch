@@ -76,7 +76,7 @@
 | S-18 | High | No explicit consent mechanism before processing resume data. | `webapp/routes/profile.py:59` |
 | S-19 | High | No configurable data retention. Resume text stored indefinitely in profile. | (missing) |
 | S-20 | High | No account deletion or data export capability (GDPR). | (missing) |
-| S-21 | Medium | Resume text sent to Groq LLM API. User consent for external API call not explicitly obtained. | `app/services/resume_parser.py:123` |
+| S-21 | Medium | Resume text sent to OpenAI API. User consent for external API call not explicitly obtained. | `app/services/resume_parser.py:123` |
 | S-22 | Medium | No prompt-injection resistance in resume parsing. Malicious PDF text could manipulate LLM output. | `app/services/resume_parser.py:70-102` |
 
 ### 3.2 Personal Data
@@ -95,7 +95,7 @@
 |---|----------|---------|----------|
 | S-26 | Critical | .env file may be committed if .gitignore is not properly configured. | `.gitignore` |
 | S-27 | High | No secrets rotation mechanism. | (missing) |
-| S-28 | Medium | API keys (Adzuna, Reed, Groq) stored in .env without encryption. | `.env.example` |
+| S-28 | Medium | API keys (Adzuna, Reed, OpenAI) stored in .env without encryption. | `.env.example` |
 
 ---
 

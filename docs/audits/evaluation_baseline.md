@@ -119,7 +119,7 @@ TEST_QUERIES = [
 ## 6. Explanation Evaluation
 
 ### Current State
-- RAG explanations generated via Groq LLM.
+- RAG explanations generated via OpenAI.
 - Fallback template exists.
 - No validation of generated explanations.
 
