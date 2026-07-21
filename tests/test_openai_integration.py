@@ -8,9 +8,21 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 from uuid import uuid4
 
-from app.services.rag import generate_explanation, _explanation_cache, _client
-from app.services.resume_parser import parse_resume_with_llm, EXTRACTION_PROMPT, _normalize_parsed
+import app.services.rag as rag_service
+from app.services.rag import generate_explanation
+from app.services.resume_parser import (
+    parse_resume_with_llm,
+    EXTRACTION_PROMPT,
+    _normalize_parsed,
+    ResumeExtraction,
+)
 from app.services.recommendation import MatchBreakdown
+from app.services.explanation_validator import (
+    ResumeConfigurationError,
+    ResumeProviderError,
+    ResumeResponseError,
+    InvalidResumeError,
+)
 
 
 # ── Fixtures ──
@@ -70,10 +82,10 @@ def _make_fake_response(output_text):
     return fake
 
 
-def _clear_rag_state():
-    _explanation_cache.clear()
-    global _client
-    _client = None
+@pytest.fixture(autouse=True)
+def _reset_rag_state():
+    rag_service._explanation_cache.clear()
+    rag_service._client = None
 
 
 # ── Test: Installed SDK exposes Responses API (no mocks, no request) ──
@@ -92,7 +104,6 @@ def test_sdk_responses_api_available():
 
 
 def test_generate_explanation_missing_key(sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
     with patch("app.services.rag.get_settings") as mock_settings:
         mock_settings.return_value.openai_api_key = ""
         mock_settings.return_value.openai_model = "gpt-5.6-sol"
@@ -104,7 +115,7 @@ def test_generate_explanation_missing_key(sample_profile, sample_job, sample_bre
 def test_parse_resume_missing_key():
     with patch("app.services.resume_parser.get_settings") as mock_settings:
         mock_settings.return_value.openai_api_key = ""
-        with pytest.raises(ValueError, match="OPENAI_API_KEY not set"):
+        with pytest.raises(ResumeConfigurationError, match="OPENAI_API_KEY not set"):
             parse_resume_with_llm("fake resume text")
 
 
@@ -113,7 +124,7 @@ def test_parse_resume_missing_key():
 
 @patch("app.services.rag._get_client")
 def test_generate_explanation_success(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response(
         "This role matches your senior Python skills. "
@@ -139,7 +150,7 @@ def test_generate_explanation_success(mock_get_client, sample_profile, sample_jo
 
 @patch("app.services.rag._get_client")
 def test_generate_explanation_api_error(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.side_effect = Exception("Rate limit exceeded")
     mock_get_client.return_value = fake_client
@@ -153,7 +164,7 @@ def test_generate_explanation_api_error(mock_get_client, sample_profile, sample_
 
 @patch("app.services.rag._get_client")
 def test_generate_explanation_none_output(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response(None)
     mock_get_client.return_value = fake_client
@@ -164,7 +175,7 @@ def test_generate_explanation_none_output(mock_get_client, sample_profile, sampl
 
 @patch("app.services.rag._get_client")
 def test_generate_explanation_empty_output(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("")
     mock_get_client.return_value = fake_client
@@ -175,7 +186,7 @@ def test_generate_explanation_empty_output(mock_get_client, sample_profile, samp
 
 @patch("app.services.rag._get_client")
 def test_generate_explanation_whitespace_output(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("   \n  \t  ")
     mock_get_client.return_value = fake_client
@@ -190,7 +201,7 @@ def test_generate_explanation_whitespace_output(mock_get_client, sample_profile,
 @patch("app.services.rag._get_client")
 @patch("app.services.rag.validate_explanation")
 def test_explanation_validation_called(mock_validate, mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("Valid explanation text.")
     mock_get_client.return_value = fake_client
@@ -208,7 +219,7 @@ def test_explanation_validation_called(mock_validate, mock_get_client, sample_pr
 @patch("app.services.rag._get_client")
 @patch("app.services.rag.validate_explanation")
 def test_explanation_validation_failure_uses_fallback(mock_validate, mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("Hallucinated text with fake claims.")
     mock_get_client.return_value = fake_client
@@ -228,7 +239,7 @@ def test_explanation_validation_failure_uses_fallback(mock_validate, mock_get_cl
 
 @patch("app.services.rag._get_client")
 def test_valid_output_cached(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("Cached explanation text.")
     mock_get_client.return_value = fake_client
@@ -242,13 +253,13 @@ def test_valid_output_cached(mock_get_client, sample_profile, sample_job, sample
 
 @patch("app.services.rag._get_client")
 def test_invalid_output_not_cached(mock_get_client, sample_profile, sample_job, sample_breakdown):
-    _clear_rag_state()
+
     fake_client = MagicMock()
     fake_client.responses.create.return_value = _make_fake_response("")
     mock_get_client.return_value = fake_client
 
     generate_explanation(sample_profile, sample_job, sample_breakdown, validate=False)
-    assert len(_explanation_cache) == 0
+    assert len(rag_service._explanation_cache) == 0
 
 
 # ── Tests: Successful Resume Parsing ──
@@ -436,7 +447,7 @@ def test_parse_resume_malformed_json(mock_openai, mock_get_settings):
     fake_client.responses.create.return_value = fake_response
     mock_openai.return_value = fake_client
 
-    with pytest.raises(ValueError, match="Resume processing is temporarily unavailable"):
+    with pytest.raises(ResumeResponseError, match="Resume processing is temporarily unavailable"):
         parse_resume_with_llm("Some resume text")
 
 
@@ -457,7 +468,7 @@ def test_parse_resume_empty_output(mock_openai, mock_get_settings):
     fake_client.responses.create.return_value = fake_response
     mock_openai.return_value = fake_client
 
-    with pytest.raises(ValueError, match="Resume processing is temporarily unavailable"):
+    with pytest.raises(ResumeResponseError, match="Resume processing is temporarily unavailable"):
         parse_resume_with_llm("empty resume")
 
 
@@ -476,7 +487,7 @@ def test_parse_resume_api_error(mock_openai, mock_get_settings):
     fake_client.responses.create.side_effect = Exception("API unavailable")
     mock_openai.return_value = fake_client
 
-    with pytest.raises(ValueError, match="Resume processing is temporarily unavailable"):
+    with pytest.raises(ResumeProviderError, match="Resume processing is temporarily unavailable"):
         parse_resume_with_llm("Some resume text")
 
 
@@ -497,7 +508,7 @@ def test_parse_resume_invalid_schema(mock_openai, mock_get_settings):
     fake_client.responses.create.return_value = fake_response
     mock_openai.return_value = fake_client
 
-    with pytest.raises(ValueError, match="Resume processing is temporarily unavailable"):
+    with pytest.raises(ResumeResponseError, match="Resume processing is temporarily unavailable"):
         parse_resume_with_llm("schema resume")
 
 
@@ -527,3 +538,75 @@ def test_normalize_parsed_non_list_work_history():
     data = {"work_history": "not a list"}
     result = _normalize_parsed(data)
     assert result["work_history"] == []
+
+
+# ── Tests: Structured Outputs Fallback ──
+
+
+@patch("app.services.resume_parser.get_settings")
+@patch("app.services.resume_parser.OpenAI")
+def test_parse_resume_structured_outputs_fallback(mock_openai, mock_get_settings):
+    """When structured outputs (text.format) fails, it should fall back to plain JSON prompt."""
+    mock_settings = MagicMock()
+    mock_settings.openai_api_key = "sk-test"
+    mock_settings.openai_model = "gpt-5.6-sol"
+    mock_get_settings.return_value = mock_settings
+
+    # First call (structured outputs) fails, second call succeeds
+    fake_client = MagicMock()
+    fake_response = MagicMock()
+    fake_response.output_text = json.dumps({"skills": ["Python"]})
+    fake_client.responses.create.side_effect = [Exception("Unsupported param"), fake_response]
+    mock_openai.return_value = fake_client
+
+    result = parse_resume_with_llm("Some resume text")
+    assert fake_client.responses.create.call_count == 2
+    assert "python" in result["skills"]
+
+
+@patch("app.services.resume_parser.get_settings")
+@patch("app.services.resume_parser.OpenAI")
+def test_parse_resume_both_attempts_fail(mock_openai, mock_get_settings):
+    """If both structured outputs and the fallback fail, raise ResumeProviderError."""
+    mock_settings = MagicMock()
+    mock_settings.openai_api_key = "sk-test"
+    mock_settings.openai_model = "gpt-5.6-sol"
+    mock_get_settings.return_value = mock_settings
+
+    fake_client = MagicMock()
+    fake_client.responses.create.side_effect = Exception("API unavailable")
+    mock_openai.return_value = fake_client
+
+    with pytest.raises(ResumeProviderError, match="Resume processing is temporarily unavailable"):
+        parse_resume_with_llm("Some resume text")
+
+
+# ── Tests: Validation — High Confidence Failure (Phase 1 fix) ──
+
+
+@patch("app.services.rag._get_client")
+@patch("app.services.rag.validate_explanation")
+def test_explanation_validation_failure_high_confidence(mock_validate, mock_get_client, sample_profile, sample_job, sample_breakdown):
+    """Even with high confidence, invalid explanations must use fallback (Phase 1 fix)."""
+    fake_client = MagicMock()
+    fake_client.responses.create.return_value = _make_fake_response("Hallucinated text with fake claims.")
+    mock_get_client.return_value = fake_client
+
+    mock_result = MagicMock()
+    mock_result.is_valid = False
+    mock_result.confidence = 0.9
+    mock_result.issues = ["Confident but wrong claim"]
+    mock_validate.return_value = mock_result
+
+    result = generate_explanation(sample_profile, sample_job, sample_breakdown, validate=True)
+    assert "85%" in result
+    assert fake_client.responses.create.call_count == 1
+
+
+# ── Tests: Autouse Fixture Resets State ──
+
+
+def test_autouse_fixture_resets_cache(sample_profile, sample_job, sample_breakdown):
+    """The autouse fixture should clear cache between tests."""
+    assert len(rag_service._explanation_cache) == 0
+    assert rag_service._client is None

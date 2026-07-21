@@ -162,16 +162,10 @@ def generate_explanation(
             validation = validate_explanation(explanation, profile, job, breakdown)
             if not validation.is_valid:
                 logger.warning(
-                    f"Explanation validation failed: {validation.issues}. "
-                    f"Confidence: {validation.confidence}. Using fallback."
+                    "Explanation validation failed (confidence=%s). Using fallback.",
+                    validation.confidence,
                 )
-                # If validation fails badly, use template instead
-                if validation.confidence < 0.5:
-                    explanation = _fallback_explanation(breakdown)
-                else:
-                    # Log issues but keep the explanation (minor issues)
-                    for issue in validation.issues:
-                        logger.info(f"Validation issue (kept): {issue}")
+                return _fallback_explanation(breakdown)
 
         # Cache only non-empty explanations
         if explanation.strip() and len(_explanation_cache) < 256:

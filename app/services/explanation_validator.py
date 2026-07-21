@@ -190,3 +190,23 @@ def _check_scores(explanation_lower: str, breakdown: MatchBreakdown, result: Val
         result.issues.append(
             f"inconsistent_score_claim: calls it a poor match but score is {breakdown.match_percentage}%"
         )
+
+
+class ResumeError(Exception):
+    """Base exception for resume processing errors."""
+
+
+class InvalidResumeError(ResumeError, ValueError):
+    """Invalid user input (bad PDF, no text, empty resume)."""
+
+
+class ResumeConfigurationError(ResumeError):
+    """Missing or invalid configuration (e.g. API key not set)."""
+
+
+class ResumeProviderError(ResumeError):
+    """External provider failure (API unavailable, timeout, rate limit)."""
+
+
+class ResumeResponseError(ResumeError):
+    """Invalid response from provider (bad JSON, schema mismatch, empty output)."""

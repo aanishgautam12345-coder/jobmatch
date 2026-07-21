@@ -4,7 +4,8 @@ Pipeline:
     1. Extract raw text from uploaded PDF
     2. Send to OpenAI with a structured extraction prompt
     3. Parse the LLM's JSON response into profile fields
-    4. Return clean, structured profile data ready to save
+    4. Validate and normalize with Pydantic
+    5. Return clean, structured profile data ready to save
 
 This replaces manual profile entry — upload once, everything auto-fills.
 """
@@ -12,9 +13,100 @@ This replaces manual profile entry — upload once, everything auto-fills.
 import json
 import re
 from io import BytesIO
+from typing import Optional
 
 from openai import OpenAI
+from pydantic import BaseModel, field_validator, model_validator
+
 from app.config import get_settings
+from app.services.explanation_validator import (
+    InvalidResumeError,
+    ResumeConfigurationError,
+    ResumeProviderError,
+    ResumeResponseError,
+)
+
+
+class WorkHistoryEntry(BaseModel):
+    model_config = {"extra": "forbid"}
+    title: str
+    company: str
+    duration: Optional[str] = None
+
+
+class ResumeExtraction(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    full_name: Optional[str] = None
+    headline: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    skills: list[str] = []
+    experience_years: Optional[int] = None
+    experience_level: Optional[str] = None
+    preferred_locations: list[str] = []
+    education: Optional[str] = None
+    career_interests: Optional[str] = None
+    work_history: list[WorkHistoryEntry] = []
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _normalize_skills(cls, v):
+        if not isinstance(v, list):
+            return []
+        seen = set()
+        result = []
+        for s in v:
+            cleaned = str(s).strip().lower()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                result.append(cleaned)
+        return result
+
+    @field_validator("experience_years", mode="before")
+    @classmethod
+    def _normalize_experience_years(cls, v):
+        if v is None:
+            return None
+        try:
+            val = int(float(v))
+        except (ValueError, TypeError):
+            return None
+        if val < 0 or val > 50:
+            return None
+        return val
+
+    @field_validator("preferred_locations", mode="before")
+    @classmethod
+    def _normalize_locations(cls, v):
+        if not isinstance(v, list):
+            return []
+        return [str(loc).strip() for loc in v if loc and str(loc).strip()]
+
+    @field_validator("work_history", mode="before")
+    @classmethod
+    def _normalize_work_history(cls, v):
+        if not isinstance(v, list):
+            return []
+        return v
+
+    @model_validator(mode="after")
+    def _infer_experience_level(self):
+        if self.experience_level is None or self.experience_level.lower().strip() not in {
+            "junior", "mid", "senior", "lead", "principal",
+        }:
+            if self.experience_years is not None:
+                if self.experience_years <= 2:
+                    self.experience_level = "junior"
+                elif self.experience_years <= 5:
+                    self.experience_level = "mid"
+                elif self.experience_years <= 9:
+                    self.experience_level = "senior"
+                else:
+                    self.experience_level = "lead"
+            else:
+                self.experience_level = None
+        return self
 
 # Try multiple PDF libraries — use whichever is installed
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
@@ -103,8 +195,17 @@ RESUME TEXT:
 """
 
 
+def _build_resume_schema() -> dict:
+    """Build JSON Schema for OpenAI structured outputs."""
+    return ResumeExtraction.model_json_schema()
+
+
 def parse_resume_with_llm(resume_text: str) -> dict:
     """Send resume text to OpenAI and get structured profile data back.
+
+    Attempts structured outputs first (text.format with JSON schema).
+    Falls back to JSON prompt parsing if the model doesn't support it.
+    Validates the result with Pydantic before returning.
 
     Args:
         resume_text: Raw text extracted from the PDF.
@@ -113,31 +214,54 @@ def parse_resume_with_llm(resume_text: str) -> dict:
         Dict with structured profile fields.
 
     Raises:
-        ValueError: If the API key is missing, the response is empty,
-            or parsing fails.
+        ResumeConfigurationError: If the API key is missing.
+        ResumeProviderError: If the API call fails.
+        ResumeResponseError: If the response is empty or unparseable.
     """
     settings = get_settings()
     if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY not set in .env")
+        raise ResumeConfigurationError("OPENAI_API_KEY not set in .env")
 
     client = OpenAI(api_key=settings.openai_api_key)
 
     # Truncate very long resumes to stay within context limits
     truncated = resume_text[:6000]
 
+    # ── Attempt 1: Structured outputs with JSON schema ──
+    response = None
     try:
         response = client.responses.create(
             model=settings.openai_model,
             instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
             input=EXTRACTION_PROMPT + truncated,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "resume_extraction",
+                    "schema": _build_resume_schema(),
+                    "strict": True,
+                }
+            },
             max_output_tokens=1500,
         )
     except Exception:
-        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
+        pass
+
+    # ── Attempt 2: Fallback to plain JSON prompt ──
+    if response is None:
+        try:
+            response = client.responses.create(
+                model=settings.openai_model,
+                instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
+                input=EXTRACTION_PROMPT + truncated,
+                max_output_tokens=1500,
+            )
+        except Exception as e:
+            raise ResumeProviderError("Resume processing is temporarily unavailable. Please try again later.") from e
 
     raw_output = getattr(response, 'output_text', None)
     if not isinstance(raw_output, str) or not raw_output.strip():
-        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
+        raise ResumeResponseError("Resume processing is temporarily unavailable. Please try again later.")
 
     raw = raw_output.strip()
     raw = raw.strip("`")
@@ -153,82 +277,24 @@ def parse_resume_with_llm(resume_text: str) -> dict:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
+        raise ResumeResponseError("Resume processing is temporarily unavailable. Please try again later.")
 
     if not isinstance(parsed, dict):
-        raise ValueError("Resume processing is temporarily unavailable. Please try again later.")
+        raise ResumeResponseError("Resume processing is temporarily unavailable. Please try again later.")
 
-    return _normalize_parsed(parsed)
+    # Validate and normalize with Pydantic
+    try:
+        extraction = ResumeExtraction.model_validate(parsed)
+    except Exception:
+        raise ResumeResponseError("Resume processing is temporarily unavailable. Please try again later.")
+
+    return extraction.model_dump()
 
 
 def _normalize_parsed(data: dict) -> dict:
-    """Clean and normalize the LLM's output into consistent types."""
-
-    # Ensure skills is a flat list of lowercase strings, remove blanks and duplicates
-    skills = data.get("skills", [])
-    if isinstance(skills, list):
-        seen = set()
-        deduped = []
-        for s in skills:
-            cleaned = str(s).strip().lower()
-            if cleaned and cleaned not in seen:
-                seen.add(cleaned)
-                deduped.append(cleaned)
-        skills = deduped
-    else:
-        skills = []
-
-    # Ensure experience_years is a non-negative int
-    exp_years = data.get("experience_years")
-    if exp_years is not None:
-        try:
-            exp_years = int(float(exp_years))
-            if exp_years < 0 or exp_years > 50:
-                exp_years = None
-        except (ValueError, TypeError):
-            exp_years = None
-
-    # Normalize experience level
-    exp_level = data.get("experience_level", "").lower().strip() if data.get("experience_level") else None
-    valid_levels = ["junior", "mid", "senior", "lead", "principal"]
-    if exp_level not in valid_levels:
-        if exp_years is not None:
-            if exp_years <= 2:
-                exp_level = "junior"
-            elif exp_years <= 5:
-                exp_level = "mid"
-            elif exp_years <= 9:
-                exp_level = "senior"
-            else:
-                exp_level = "lead"
-        else:
-            exp_level = None
-
-    # Ensure preferred_locations is a list of non-blank strings
-    locations = data.get("preferred_locations", [])
-    if isinstance(locations, list):
-        locations = [str(loc).strip() for loc in locations if loc and str(loc).strip()]
-    else:
-        locations = []
-
-    # Validate work_history as a list
-    work_history = data.get("work_history", [])
-    if not isinstance(work_history, list):
-        work_history = []
-
-    return {
-        "full_name": data.get("full_name"),
-        "headline": data.get("headline"),
-        "email": data.get("email"),
-        "phone": data.get("phone"),
-        "skills": skills,
-        "experience_years": exp_years,
-        "experience_level": exp_level,
-        "preferred_locations": locations,
-        "education": data.get("education"),
-        "career_interests": data.get("career_interests"),
-        "work_history": work_history,
-    }
+    """Clean and normalize the LLM's output using Pydantic validation."""
+    extraction = ResumeExtraction.model_validate(data)
+    return extraction.model_dump()
 
 
 def process_resume(pdf_bytes: bytes) -> dict:
@@ -246,7 +312,7 @@ def process_resume(pdf_bytes: bytes) -> dict:
     text = extract_text_from_pdf(pdf_bytes)
 
     if len(text.strip()) < 50:
-        raise ValueError(
+        raise InvalidResumeError(
             "Could not extract enough text from the PDF. "
             "Make sure it's a text-based PDF, not a scanned image."
         )

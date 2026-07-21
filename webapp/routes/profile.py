@@ -7,6 +7,12 @@ from app.database import SessionLocal
 from app.models.user import UserProfile
 from app.services.embedding import build_profile_text, generate_embedding
 from app.services.resume_parser import process_resume
+from app.services.explanation_validator import (
+    InvalidResumeError,
+    ResumeConfigurationError,
+    ResumeProviderError,
+    ResumeResponseError,
+)
 
 profile_bp = Blueprint("profile", __name__, url_prefix="/profile")
 
@@ -78,7 +84,9 @@ def upload_resume():
         pdf_bytes = file.read()
         extracted = process_resume(pdf_bytes)
         return jsonify({"success": True, "data": extracted})
-    except ValueError:
-        return jsonify({"error": "Resume processing is temporarily unavailable. Please try again later."}), 400
+    except InvalidResumeError:
+        return jsonify({"error": "Could not parse the uploaded PDF. Make sure it's a text-based resume, not a scanned image."}), 400
+    except (ResumeConfigurationError, ResumeProviderError, ResumeResponseError):
+        return jsonify({"error": "Resume processing is temporarily unavailable. Please try again later."}), 503
     except Exception:
-        return jsonify({"error": "Resume processing is temporarily unavailable. Please try again later."}), 500
+        return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
