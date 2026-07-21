@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Saved Jobs — JobMatch AI{% endblock %}
+
+{% macro logo(name, cls="company-logo") -%}
+{%- set colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e','#16a085','#c0392b','#2980b9','#8e44ad'] -%}
+{%- set idx = (name|default('?',true)|list|map('ord')|sum) % colors|length -%}
+<div class="{{ cls }}" style="background:{{ colors[idx] }}">{{ name|default('?',true)|truncate(2,true,'')|upper }}</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="max-w-[1128px] mx-auto px-4 py-6">
+    <div class="flex gap-6">
+        <div class="hidden lg:block w-[225px] shrink-0">
+            <div class="li-card p-4">
+                <div class="text-sm font-semibold text-[#000000e6]">Saved jobs</div>
+                <div class="text-xs text-[#00000099] mt-1">{{ rows|length }} saved</div>
+            </div>
+        </div>
+
+        <div class="flex-1 min-w-0">
+            <h1 class="text-base font-semibold text-[#000000e6] mb-1">Saved jobs</h1>
+            <p class="text-sm text-[#00000099] mb-4">{{ rows|length }} job{{ 's' if rows|length != 1 }} saved for later</p>
+
+            <div class="space-y-3">
+                {% for saved_record, job in rows %}
+                <div class="li-card p-5 hover:shadow-md transition-shadow" id="row-{{ job.id }}">
+                    <div class="flex items-start gap-3">
+                        {{ logo(job.company) }}
+                        <div class="flex-1 min-w-0">
+                            <a href="{{ url_for('jobs.job_detail', job_id=job.id) }}" class="font-semibold text-[#000000e6] hover:text-brand-600 hover:underline">{{ job.title_clean or job.title }}</a>
+                            <div class="text-sm text-[#00000099]">{{ job.company or 'N/A' }}</div>
+                            <div class="text-xs text-[#00000099] mt-1">
+                                {{ job.location_city or job.location_country or 'Location N/A' }}
+                                {% if job.remote %} · Remote{% endif %}
+                                {% if job.salary_min is not none or job.salary_max is not none %}
+                                    ·
+                                    {% if job.salary_min is not none and job.salary_max is not none %}
+                                        {{ "{:,.0f}".format(job.salary_min) }}–{{ "{:,.0f}".format(job.salary_max) }}
+                                    {% elif job.salary_max is not none %}
+                                        Up to {{ "{:,.0f}".format(job.salary_max) }}
+                                    {% elif job.salary_min is not none %}
+                                        From {{ "{:,.0f}".format(job.salary_min) }}
+                                    {% endif %}
+                                    {{ job.salary_currency or '' }}
+                                {% endif %}
+                            </div>
+                            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                                {% if job.category %}<span class="tag">{{ job.category }}</span>{% endif %}
+                                {% if job.remote %}<span class="tag-green tag">Remote</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <button onclick="unsave('{{ job.id }}')" class="text-xs font-medium text-[#c0392b] hover:text-[#e74c3c] hover:underline">Remove</button>
+                            <div class="text-[11px] text-[#999589] mt-1">Saved {{ saved_record.saved_at.strftime('%b %d') }}</div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="li-card p-8 text-center text-[#999589]">No saved jobs yet. Save jobs from Search or Recommendations.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function unsave(jobId) {
+    await fetch(`/jobs/unsave/${jobId}`, { method: 'POST' });
+    const el = document.getElementById(`row-${jobId}`);
+    el.style.opacity = '0.5';
+    setTimeout(() => el.remove(), 300);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,60 @@
+# ── Web Framework ──
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+flask==3.0.3
+flask-login==0.6.3
+flask-wtf==1.2.1
+slowapi==0.1.9
+
+# ── PDF Reading (resume parsing) ──
+pypdf==4.3.1
+
+# ── Database ──
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+pgvector==0.3.5
+alembic==1.13.2
+
+# ── Auth ──
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.9
+
+# ── Data Processing ──
+pandas==2.2.2
+pydantic==2.9.0
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+
+# ── AI / Embeddings ──
+sentence-transformers==3.1.0
+torch==2.4.0
+groq==0.11.0
+
+# ── LangChain (Agent + RAG) ──
+langchain==0.3.0
+langchain-groq==0.2.0
+langchain-community==0.3.0
+
+# ── HTTP / Scraping ──
+httpx==0.27.2
+feedparser==6.0.11
+
+# ── Email ──
+aiosmtplib==3.0.1
+jinja2==3.1.4
+
+# ── Scheduling ──
+apscheduler==3.10.4
+
+# ── Utilities ──
+rapidfuzz==3.9.7
+numpy==1.26.4
+python-dateutil==2.9.0
+
+# ── Frontend ──
+# Streamlit removed — Flask frontend is the primary UI (webapp/)
+
+# ── Dev / Testing ──
+pytest==8.3.2
+pytest-asyncio==0.24.0

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}JobMatch AI — Jobs that actually fit{% endblock %}
+{% block content %}
+<div class="bg-white">
+    <div class="max-w-[1128px] mx-auto px-4 py-16 md:py-24 flex flex-col md:flex-row items-center gap-12">
+        <div class="flex-1">
+            <h1 class="text-5xl md:text-6xl font-extrabold text-[#000000e6] leading-[1.1] tracking-tight">
+                Find the right job<br>for your career
+            </h1>
+            <p class="mt-6 text-xl text-[#00000099] leading-relaxed max-w-lg">
+                AI-powered semantic search that understands what you actually do — not just keyword matching. Get ranked recommendations with clear explanations of why each job fits.
+            </p>
+            <div class="mt-8 flex items-center gap-4">
+                <a href="{{ url_for('auth.register') }}" class="li-btn-primary text-base py-3 px-8">Get started for free</a>
+                <a href="{{ url_for('auth.login') }}" class="li-btn-outline text-base py-3 px-8">Sign in</a>
+            </div>
+        </div>
+        <div class="flex-1 hidden md:block">
+            <div class="relative">
+                <div class="absolute -top-6 -left-6 w-72 h-72 bg-brand-100 rounded-full opacity-40 blur-3xl"></div>
+                <div class="relative bg-white rounded-xl border border-[#e0dfdc] shadow-lg p-6 space-y-4">
+                    <div class="flex items-start gap-3">
+                        <div class="company-logo bg-brand-600">S</div>
+                        <div>
+                            <div class="font-semibold text-[#000000e6]">Senior Backend Developer</div>
+                            <div class="text-sm text-[#00000099]">Siemens · London · £75k–£95k</div>
+                            <div class="mt-2 flex gap-2">
+                                <span class="tag">Python</span><span class="tag">Django</span><span class="tag-green tag">Remote</span>
+                            </div>
+                        </div>
+                        <div class="ml-auto text-right">
+                            <div class="match-badge bg-[#d4edda] text-[#155724]">87% match</div>
+                        </div>
+                    </div>
+                    <div class="border-t border-[#e0dfdc]"></div>
+                    <div class="flex items-start gap-3">
+                        <div class="company-logo" style="background:#e74c3c">G</div>
+                        <div>
+                            <div class="font-semibold text-[#000000e6]">Full Stack Engineer</div>
+                            <div class="text-sm text-[#00000099]">Genpact · Manchester · £55k–£70k</div>
+                            <div class="mt-2 flex gap-2">
+                                <span class="tag">React</span><span class="tag">Node.js</span><span class="tag-green tag">Remote</span>
+                            </div>
+                        </div>
+                        <div class="ml-auto text-right">
+                            <div class="match-badge bg-[#eef2ff] text-[#4338ca]">79% match</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="max-w-[1128px] mx-auto px-4 py-16">
+    <div class="text-center mb-12">
+        <h2 class="text-3xl font-bold text-[#000000e6]">Why JobMatch AI?</h2>
+        <p class="mt-3 text-[#00000099] text-lg">Built for how modern job search actually works</p>
+    </div>
+    <div class="grid md:grid-cols-3 gap-6">
+        <div class="li-card p-8">
+            <div class="w-12 h-12 bg-brand-100 rounded-lg flex items-center justify-center mb-5">
+                <svg class="w-6 h-6 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+            </div>
+            <h3 class="text-lg font-bold text-[#000000e6] mb-2">Semantic search</h3>
+            <p class="text-[#00000099] leading-relaxed text-sm">Search by meaning, not exact words. "Entry level marketing" finds relevant roles even without those exact keywords.</p>
+        </div>
+        <div class="li-card p-8">
+            <div class="w-12 h-12 bg-brand-100 rounded-lg flex items-center justify-center mb-5">
+                <svg class="w-6 h-6 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+            </div>
+            <h3 class="text-lg font-bold text-[#000000e6] mb-2">AI-explained matches</h3>
+            <p class="text-[#00000099] leading-relaxed text-sm">Every recommendation comes with a plain-English explanation of why it fits your skills, experience, and preferences.</p>
+        </div>
+        <div class="li-card p-8">
+            <div class="w-12 h-12 bg-brand-100 rounded-lg flex items-center justify-center mb-5">
+                <svg class="w-6 h-6 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <h3 class="text-lg font-bold text-[#000000e6] mb-2">6-factor scoring</h3>
+            <p class="text-[#00000099] leading-relaxed text-sm">Jobs ranked across 6 dimensions: skills, semantic fit, location, salary, experience level, and job type.</p>
+        </div>
+    </div>
+</div>
+
+<div class="bg-white border-t border-[#e0dfdc]">
+    <div class="max-w-[1128px] mx-auto px-4 py-16 text-center">
+        <h2 class="text-3xl font-bold text-[#000000e6]">Ready to find your next role?</h2>
+        <p class="mt-3 text-[#00000099] text-lg mb-8">Join and let AI do the heavy lifting</p>
+        <a href="{{ url_for('auth.register') }}" class="li-btn-primary text-base py-3 px-10">Create your free account</a>
+    </div>
+</div>
+{% endblock %}

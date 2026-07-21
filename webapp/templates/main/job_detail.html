@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title_clean or job.title }} — JobMatch AI{% endblock %}
+
+{% macro logo(name, cls="company-logo") -%}
+{%- set colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e','#16a085','#c0392b','#2980b9','#8e44ad'] -%}
+{%- set idx = (name|default('?',true)|list|map('ord')|sum) % colors|length -%}
+<div class="{{ cls }}" style="background:{{ colors[idx] }}">{{ name|default('?',true)|truncate(2,true,'')|upper }}</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="max-w-[1128px] mx-auto px-4 py-6">
+    <div class="flex gap-6">
+        <!-- Main content -->
+        <div class="flex-1 min-w-0">
+            <a href="{{ url_for('jobs.search') }}" class="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline mb-4">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+                Back to search
+            </a>
+
+            <div class="li-card p-6">
+                <div class="flex items-start gap-4">
+                    {{ logo(job.company, "company-logo") }}
+                    <div class="flex-1">
+                        <h1 class="text-xl font-bold text-[#000000e6]">{{ job.title_clean or job.title }}</h1>
+                        <div class="text-sm text-[#00000099] mt-1">
+                            {{ job.company or 'N/A' }} · {{ job.location_city or job.location_country or 'Location N/A' }}
+                            {% if job.remote %} · Remote{% endif %}
+                        </div>
+                        <div class="text-sm text-[#00000099] mt-1">
+                            {% if job.salary_min is not none or job.salary_max is not none %}
+                                {% if job.salary_min is not none and job.salary_max is not none %}
+                                    {{ "{:,.0f}".format(job.salary_min) }}–{{ "{:,.0f}".format(job.salary_max) }} {{ job.salary_currency or '' }}
+                                {% elif job.salary_max is not none %}
+                                    Up to {{ "{:,.0f}".format(job.salary_max) }} {{ job.salary_currency or '' }}
+                                {% elif job.salary_min is not none %}
+                                    From {{ "{:,.0f}".format(job.salary_min) }} {{ job.salary_currency or '' }}
+                                {% endif %}
+                                {% if job.salary_period %} ({{ job.salary_period }}){% endif %}
+                            {% else %}
+                                Salary not disclosed
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center gap-2 mt-3 flex-wrap">
+                            {% if job.job_type %}<span class="tag">{{ job.job_type }}</span>{% endif %}
+                            {% if job.experience_level %}<span class="tag">{{ job.experience_level }}</span>{% endif %}
+                            {% if job.category %}<span class="tag">{{ job.category }}</span>{% endif %}
+                            {% if job.remote %}<span class="tag-green tag">Remote</span>{% endif %}
+                            {% if job.source %}<span class="tag text-[#66615b]">{{ job.source }}</span>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 mt-6 pt-4 border-t border-[#e0dfdc]">
+                    {% if job.url %}
+                    <a href="{{ job.url }}" target="_blank" rel="noopener" class="li-btn-primary py-2 px-6">Apply now</a>
+                    {% endif %}
+                    <button onclick="toggleSave('{{ job.id }}', this)" data-saved="{{ is_saved|lower }}" class="li-btn-outline py-2 px-5 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="{{ 'currentColor' if is_saved else 'none' }}" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+                        {{ 'Saved' if is_saved else 'Save' }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Description -->
+            {% if job.description %}
+            <div class="li-card p-6 mt-4">
+                <h2 class="text-base font-semibold text-[#000000e6] mb-3">About this role</h2>
+                <div class="text-sm text-[#00000099] leading-relaxed whitespace-pre-line">{{ job.description|format_description }}</div>
+            </div>
+            {% endif %}
+
+            <!-- Skills -->
+            {% if skills %}
+            <div class="li-card p-6 mt-4">
+                <h2 class="text-base font-semibold text-[#000000e6] mb-3">Required skills</h2>
+                <div class="flex flex-wrap gap-2">
+                    {% for skill in skills %}
+                    <span class="tag text-sm">{{ skill }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Match breakdown -->
+            {% if breakdown %}
+            <div class="li-card p-6 mt-4">
+                <h2 class="text-base font-semibold text-[#000000e6] mb-3">Match breakdown</h2>
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 text-center">
+                    <div>
+                        <div class="text-xs text-[#999589]">Semantic</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.semantic_similarity }}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-[#999589]">Skills</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.skill_overlap }}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-[#999589]">Location</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.location_fit }}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-[#999589]">Salary</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.salary_fit }}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-[#999589]">Experience</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.experience_fit }}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-[#999589]">Type</div>
+                        <div class="text-lg font-bold text-[#000000e6]">{{ breakdown.job_type_fit }}%</div>
+                    </div>
+                </div>
+                {% if matching_skills %}
+                <div class="mt-3 text-sm text-[#155724]">Matching: {{ matching_skills|join(', ') }}</div>
+                {% endif %}
+                {% if missing_skills %}
+                <div class="mt-1 text-sm text-[#92400e]">Missing: {{ missing_skills|join(', ') }}</div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Explanation -->
+            <div class="li-card p-6 mt-4">
+                <h2 class="text-base font-semibold text-[#000000e6] mb-3">AI explanation</h2>
+                <button onclick="explainJob('{{ job.id }}', this)" class="li-btn-outline text-sm py-2 px-5">Generate explanation</button>
+                <div class="explanation-box hidden mt-3 p-4 bg-[#f3f2ef] rounded-lg text-sm text-[#00000099] leading-relaxed"></div>
+            </div>
+        </div>
+
+        <!-- Right sidebar -->
+        <div class="hidden lg:block w-[300px] shrink-0">
+            <div class="li-card p-5">
+                <div class="text-sm font-semibold text-[#000000e6] mb-3">Similar jobs</div>
+                {% if similar_jobs %}
+                <div class="space-y-3">
+                    {% for sj in similar_jobs %}
+                    <a href="{{ url_for('jobs.job_detail', job_id=sj.id) }}" class="block hover:bg-[#f3f2ef] -mx-2 px-2 py-1.5 rounded transition">
+                        <div class="flex items-start gap-2">
+                            {{ logo(sj.company, "company-logo-sm") }}
+                            <div class="min-w-0">
+                                <div class="text-sm font-medium text-[#000000e6] truncate">{{ sj.title_clean or sj.title }}</div>
+                                <div class="text-xs text-[#00000099]">{{ sj.company or 'N/A' }}</div>
+                            </div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-[#999589]">No similar jobs found.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function toggleSave(jobId, btn) {
+    const isSaved = btn.dataset.saved === 'true';
+    const url = isSaved ? `/jobs/unsave/${jobId}` : `/jobs/save/${jobId}`;
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+    btn.dataset.saved = data.saved;
+    btn.innerHTML = data.saved
+        ? '<svg class="w-4 h-4 fill-current" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg> Saved'
+        : '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg> Save';
+}
+async function explainJob(jobId, btn) {
+    const box = btn.nextElementSibling;
+    box.classList.remove('hidden');
+    box.textContent = 'Generating explanation...';
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/jobs/explain/${jobId}`);
+        const data = await res.json();
+        box.textContent = data.explanation || 'Could not generate explanation.';
+    } catch (err) {
+        box.textContent = 'Something went wrong.';
+    }
+    btn.disabled = false;
+}
+</script>
+{% endblock %}

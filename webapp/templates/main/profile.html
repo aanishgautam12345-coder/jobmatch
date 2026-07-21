@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}My Profile — JobMatch AI{% endblock %}
+
+{% block content %}
+<div class="max-w-[1128px] mx-auto px-4 py-6">
+    <div class="flex gap-6">
+        <div class="hidden lg:block w-[225px] shrink-0">
+            <div class="li-card p-4">
+                <div class="text-sm font-semibold text-[#000000e6]">Profile settings</div>
+                <div class="text-xs text-[#00000099] mt-1">Edit your info</div>
+                <div class="mt-3 space-y-2">
+                    <a href="#about" class="block text-sm text-brand-600 hover:underline font-medium">About</a>
+                    <a href="#skills" class="block text-sm text-brand-600 hover:underline font-medium">Skills</a>
+                    <a href="#preferences" class="block text-sm text-brand-600 hover:underline font-medium">Preferences</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 min-w-0 space-y-4">
+            <!-- Banner + avatar -->
+            <div class="li-card overflow-hidden">
+                <div class="h-[120px] bg-gradient-to-r from-brand-600 to-brand-400"></div>
+                <div class="px-6 pb-5 relative">
+                    <div class="w-[96px] h-[96px] rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-3xl font-bold border-4 border-white shadow -mt-12 relative z-10">
+                        {{ (current_user.profile.full_name or current_user.email)[0]|upper }}
+                    </div>
+                    <div class="mt-3">
+                        <div class="text-xl font-bold text-[#000000e6]">{{ current_user.profile.full_name or 'Your name' }}</div>
+                        <div class="text-sm text-[#00000099]">{{ current_user.profile.headline or 'Add a headline' }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resume upload -->
+            <div class="li-card p-6">
+                <h2 class="text-base font-semibold text-[#000000e6] mb-3">Resume</h2>
+                <div id="upload-zone" class="border-2 border-dashed border-[#d0cec7] rounded-lg p-6 text-center cursor-pointer hover:border-brand-500 hover:bg-[#eef2ff] transition">
+                    <input type="file" id="resume-input" accept=".pdf" class="hidden">
+                    <svg class="w-8 h-8 mx-auto text-[#999589] mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <p class="text-sm font-medium text-[#000000e6]">Upload your resume (PDF)</p>
+                    <p class="text-xs text-[#999589] mt-1">Auto-fill your profile from your resume</p>
+                </div>
+                <div id="upload-status" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
+            </div>
+
+            <!-- Profile form -->
+            <form method="POST" id="profile-form" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="li-card p-6">
+                    <h2 class="text-base font-semibold text-[#000000e6] mb-4" id="about">About you</h2>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Full name</label>
+                            <input type="text" name="full_name" id="full_name" value="{{ profile.full_name or '' }}" class="li-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Headline</label>
+                            <input type="text" name="headline" id="headline" value="{{ profile.headline or '' }}" placeholder="e.g. Backend Python Developer" class="li-input">
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-[#00000099] mb-1">Career interests</label>
+                        <textarea name="career_interests" id="career_interests" rows="3" placeholder="e.g. Backend development, cloud infrastructure, scalable APIs" class="li-input">{{ profile.career_interests or '' }}</textarea>
+                    </div>
+                </div>
+
+                <div class="li-card p-6">
+                    <h2 class="text-base font-semibold text-[#000000e6] mb-4" id="skills">Skills &amp; experience</h2>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-[#00000099] mb-1">Skills (comma-separated)</label>
+                        <textarea name="skills" id="skills" rows="2" placeholder="python, django, postgresql, docker, aws" class="li-input">{{ profile.skills|join(', ') if profile.skills else '' }}</textarea>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Experience level</label>
+                            <select name="experience_level" id="experience_level" class="li-input">
+                                <option value="">Select...</option>
+                                {% for lvl in ['junior', 'mid', 'senior', 'lead', 'principal'] %}
+                                <option value="{{ lvl }}" {% if profile.experience_level == lvl %}selected{% endif %}>{{ lvl|capitalize }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Years of experience</label>
+                            <input type="number" name="experience_years" id="experience_years" min="0" max="50" value="{{ profile.experience_years or '' }}" class="li-input">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="li-card p-6">
+                    <h2 class="text-base font-semibold text-[#000000e6] mb-4" id="preferences">Preferences</h2>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-[#00000099] mb-1">Preferred locations (comma-separated)</label>
+                        <input type="text" name="preferred_locations" id="preferred_locations" value="{{ profile.preferred_locations|join(', ') if profile.preferred_locations else '' }}" placeholder="Remote, United Kingdom" class="li-input">
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Minimum salary</label>
+                            <input type="number" name="min_salary" id="min_salary" step="1000" value="{{ profile.min_salary or '' }}" class="li-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-[#00000099] mb-1">Currency</label>
+                            <select name="salary_currency" id="salary_currency" class="li-input">
+                                {% for cur in ['USD', 'GBP', 'EUR', 'INR', 'AUD', 'CAD'] %}
+                                <option value="{{ cur }}" {% if profile.salary_currency == cur %}selected{% endif %}>{{ cur }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="li-card p-6">
+                    <button type="submit" class="li-btn-primary w-full text-center py-2.5">Save all changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+const uploadZone = document.getElementById('upload-zone');
+const resumeInput = document.getElementById('resume-input');
+const statusBox = document.getElementById('upload-status');
+
+uploadZone.addEventListener('click', () => resumeInput.click());
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('border-brand-500', 'bg-[#eef2ff]'); });
+uploadZone.addEventListener('dragleave', () => { uploadZone.classList.remove('border-brand-500', 'bg-[#eef2ff]'); });
+uploadZone.addEventListener('drop', (e) => { e.preventDefault(); uploadZone.classList.remove('border-brand-500', 'bg-[#eef2ff]'); if (e.dataTransfer.files.length) { resumeInput.files = e.dataTransfer.files; handleUpload(); } });
+resumeInput.addEventListener('change', handleUpload);
+
+function showStatus(html, type) {
+    statusBox.classList.remove('hidden');
+    const colors = { loading: 'bg-[#d1ecf1] text-[#0c5460]', success: 'bg-[#d4edda] text-[#155724]', error: 'bg-[#f8d7da] text-[#721c24]' };
+    statusBox.className = 'mt-3 p-3 rounded-lg text-sm ' + (colors[type] || '');
+    statusBox.innerHTML = html;
+}
+
+async function handleUpload() {
+    const file = resumeInput.files[0];
+    if (!file) return;
+    showStatus('Reading your resume...', 'loading');
+    const formData = new FormData();
+    formData.append('resume', file);
+    try {
+        const res = await fetch("{{ url_for('profile.upload_resume') }}", { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) { showStatus('Error: ' + (data.error || 'Could not process resume'), 'error'); return; }
+        const d = data.data;
+        if (d.full_name) document.getElementById('full_name').value = d.full_name;
+        if (d.headline) document.getElementById('headline').value = d.headline;
+        if (d.skills && d.skills.length) document.getElementById('skills').value = d.skills.join(', ');
+        if (d.experience_level) document.getElementById('experience_level').value = d.experience_level;
+        if (d.experience_years) document.getElementById('experience_years').value = d.experience_years;
+        if (d.preferred_locations && d.preferred_locations.length) document.getElementById('preferred_locations').value = d.preferred_locations.join(', ');
+        if (d.career_interests) document.getElementById('career_interests').value = d.career_interests;
+        showStatus('<strong>Resume parsed!</strong> Review and save below.', 'success');
+    } catch (err) {
+        showStatus('Something went wrong: ' + err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

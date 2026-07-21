@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Join — JobMatch AI{% endblock %}
+{% block content %}
+<div class="flex items-center justify-center py-16 px-4">
+    <div class="w-full max-w-[350px]">
+        <div class="li-card p-8">
+            <h1 class="text-2xl font-bold text-[#000000e6] mb-1">Join JobMatch AI</h1>
+            <p class="text-sm text-[#00000099] mb-6">Get AI-powered job recommendations</p>
+
+            <form method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>
+                    <label class="block text-sm font-medium text-[#00000099] mb-1">Full name</label>
+                    <input type="text" name="full_name" required class="li-input" placeholder="Jane Smith">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-[#00000099] mb-1">Email</label>
+                    <input type="email" name="email" required class="li-input" placeholder="you@example.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-[#00000099] mb-1">Password</label>
+                    <input type="password" name="password" required minlength="8" class="li-input" placeholder="Min. 8 characters">
+                </div>
+                <button type="submit" class="li-btn-primary w-full text-center py-2.5 mt-2">Agree &amp; Join</button>
+            </form>
+
+            <div class="relative my-6">
+                <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-[#e0dfdc]"></div></div>
+                <div class="relative flex justify-center text-xs"><span class="bg-white px-3 text-[#999589]">or</span></div>
+            </div>
+
+            <p class="text-center text-sm text-[#00000099]">
+                Already a member? <a href="{{ url_for('auth.login') }}" class="text-brand-600 font-semibold hover:underline">Sign in</a>
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

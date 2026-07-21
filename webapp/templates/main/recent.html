@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Recent Jobs — JobMatch AI{% endblock %}
+
+{% macro logo(name, cls="company-logo") -%}
+{%- set colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e','#16a085','#c0392b','#2980b9','#8e44ad'] -%}
+{%- set idx = (name|default('?',true)|list|map('ord')|sum) % colors|length -%}
+<div class="{{ cls }}" style="background:{{ colors[idx] }}">{{ name|default('?',true)|truncate(2,true,'')|upper }}</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="max-w-[1128px] mx-auto px-4 py-6">
+    <div class="flex gap-6">
+        <div class="hidden lg:block w-[225px] shrink-0">
+            <div class="li-card p-4">
+                <div class="text-sm font-semibold text-[#000000e6]">Recent jobs</div>
+                <div class="text-xs text-[#00000099] mt-1">Latest {{ jobs|length }} additions</div>
+            </div>
+        </div>
+
+        <div class="flex-1 min-w-0">
+            <h1 class="text-base font-semibold text-[#000000e6] mb-1">Recently added</h1>
+            <p class="text-sm text-[#00000099] mb-4">The latest jobs ingested into the system</p>
+
+            <div class="space-y-3">
+                {% for job in jobs %}
+                <div class="li-card p-5 hover:shadow-md transition-shadow">
+                    <div class="flex items-start gap-3">
+                        {{ logo(job.company) }}
+                        <div class="flex-1 min-w-0">
+                            <a href="{{ url_for('jobs.job_detail', job_id=job.id) }}" class="font-semibold text-[#000000e6] hover:text-brand-600 hover:underline">{{ job.title_clean or job.title }}</a>
+                            <div class="text-sm text-[#00000099]">{{ job.company or 'N/A' }}</div>
+                            <div class="text-xs text-[#00000099] mt-1">
+                                {{ job.location_city or job.location_country or 'Location N/A' }}
+                                {% if job.remote %} · Remote{% endif %}
+                                {% if job.salary_min is not none or job.salary_max is not none %}
+                                    ·
+                                    {% if job.salary_min is not none and job.salary_max is not none %}
+                                        {{ "{:,.0f}".format(job.salary_min) }}–{{ "{:,.0f}".format(job.salary_max) }}
+                                    {% elif job.salary_max is not none %}
+                                        Up to {{ "{:,.0f}".format(job.salary_max) }}
+                                    {% elif job.salary_min is not none %}
+                                        From {{ "{:,.0f}".format(job.salary_min) }}
+                                    {% endif %}
+                                    {{ job.salary_currency or '' }}
+                                {% endif %}
+                            </div>
+                            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                                {% if job.category %}<span class="tag">{{ job.category }}</span>{% endif %}
+                                {% if job.job_type %}<span class="tag">{{ job.job_type }}</span>{% endif %}
+                                {% if job.remote %}<span class="tag-green tag">Remote</span>{% endif %}
+                                <span class="tag text-[#66615b]">{{ job.source }}</span>
+                            </div>
+                        </div>
+                        <button onclick="toggleSave('{{ job.id }}', this)" data-saved="{{ (job.id|string in saved_ids)|lower }}" class="shrink-0 text-brand-600 hover:text-brand-700">
+                            {% if job.id|string in saved_ids %}
+                            <svg class="w-5 h-5 fill-brand-600 text-brand-600" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+                            {% else %}
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+                            {% endif %}
+                        </button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="li-card p-8 text-center text-[#999589]">No jobs in the database yet.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function toggleSave(jobId, btn) {
+    const isSaved = btn.dataset.saved === 'true';
+    const url = isSaved ? `/jobs/unsave/${jobId}` : `/jobs/save/${jobId}`;
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+    btn.dataset.saved = data.saved;
+    btn.innerHTML = data.saved
+        ? '<svg class="w-5 h-5 fill-brand-600 text-brand-600" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>'
+        : '<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}JobMatch AI{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'] },
+                    colors: {
+                        li: { 50: '#f3f2ef', 100: '#e8e6e1', 200: '#d0cec7', 300: '#b8b5ad', 400: '#999589', 500: '#66615b', 600: '#4a4740', 700: '#333130', 800: '#1d1c1b', 900: '#000000e6' },
+                        brand: { DEFAULT: '#6366f1', 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f3f2ef; }
+        .li-card { background: white; border-radius: 8px; border: 1px solid #e0dfdc; }
+        .li-btn-primary { background: #6366f1; color: white; border-radius: 9999px; padding: 6px 16px; font-weight: 600; font-size: 14px; transition: background 0.15s; display: inline-block; text-decoration: none; border: none; cursor: pointer; }
+        .li-btn-primary:hover { background: #4f46e5; }
+        .li-btn-outline { border: 1px solid #6366f1; color: #6366f1; border-radius: 9999px; padding: 6px 16px; font-weight: 600; font-size: 14px; transition: all 0.15s; background: transparent; display: inline-block; text-decoration: none; }
+        .li-btn-outline:hover { background: #eef2ff; border-color: #4f46e5; }
+        .li-input { width: 100%; padding: 8px 12px; border: 1px solid #bbb; border-radius: 4px; font-size: 14px; outline: none; background: white; }
+        .li-input:focus { border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+        .nav-link { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 0 12px; text-decoration: none; font-size: 11px; color: #66615b; min-width: 60px; transition: color 0.15s; }
+        .nav-link:hover { color: #000000e6; }
+        .nav-link svg { transition: color 0.15s; }
+        .nav-active { color: #000000e6 !important; border-bottom: 2px solid #000000e6; }
+        .nav-active svg { color: #000000e6; }
+        .company-logo { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; color: white; font-size: 16px; flex-shrink: 0; }
+        .company-logo-sm { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; color: white; font-size: 12px; flex-shrink: 0; }
+        .match-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-weight: 700; font-size: 13px; }
+        .tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; background: #e8e6e1; color: #333130; }
+        .tag-green { background: #d4edda; color: #155724; }
+        .tag-blue { background: #eef2ff; color: #4338ca; }
+        .tag-amber { background: #fff8e1; color: #92400e; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="min-h-screen flex flex-col">
+    <nav class="bg-white border-b border-[#e0dfdc] sticky top-0 z-50">
+        <div class="max-w-[1128px] mx-auto px-4 flex items-center justify-between h-[52px]">
+            <div class="flex items-center gap-2">
+                <a href="{{ url_for('main.index') }}" class="flex items-center shrink-0">
+                    <div class="w-[34px] h-[34px] bg-brand-600 rounded flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M20.5 2h-17A1.5 1.5 0 002 3.5v17A1.5 1.5 0 003.5 22h17a1.5 1.5 0 001.5-1.5v-17A1.5 1.5 0 0020.5 2zM8 19H5v-9h3zM6.5 8.25A1.75 1.75 0 118.3 6.5a1.78 1.78 0 01-1.8 1.75zM19 19h-3v-4.74c0-1.42-.6-1.93-1.38-1.93A1.74 1.74 0 0013 14.19a.66.66 0 000 .14V19h-3v-9h2.9v1.3a3.11 3.11 0 012.7-1.4c1.55 0 3.36.86 3.36 3.66z"/></svg>
+                    </div>
+                </a>
+                {% if current_user.is_authenticated %}
+                <form action="{{ url_for('jobs.search') }}" method="GET" class="hidden md:block">
+                    <div class="relative">
+                        <svg class="w-4 h-4 text-[#66615b] absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                        <input type="text" name="q" placeholder="Search" value="{{ request.args.get('q', '') }}" class="pl-9 w-[280px] bg-[#eef3f8] border-none rounded h-[34px] text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+
+            {% if current_user.is_authenticated %}
+            <div class="flex items-center">
+                <a href="{{ url_for('main.index') }}" class="nav-link {% if request.endpoint == 'main.index' %}nav-active{% endif %}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></svg>
+                    <span>Home</span>
+                </a>
+                <a href="{{ url_for('jobs.search') }}" class="nav-link {% if request.endpoint == 'jobs.search' %}nav-active{% endif %}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+                    <span>Jobs</span>
+                </a>
+                <a href="{{ url_for('jobs.saved') }}" class="nav-link {% if request.endpoint == 'jobs.saved' %}nav-active{% endif %}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+                    <span>Saved</span>
+                </a>
+                <a href="{{ url_for('jobs.recent') }}" class="nav-link {% if request.endpoint == 'jobs.recent' %}nav-active{% endif %}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span>Recent</span>
+                </a>
+                <a href="{{ url_for('jobs.recommendations') }}" class="nav-link {% if request.endpoint == 'jobs.recommendations' %}nav-active{% endif %}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                    <span>For You</span>
+                </a>
+            </div>
+            {% endif %}
+
+            <div class="flex items-center gap-2">
+                {% if current_user.is_authenticated %}
+                <a href="{{ url_for('profile.view_profile') }}" class="flex items-center gap-2 px-2 py-1 rounded hover:bg-[#e8e6e1] transition">
+                    <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold border-2 border-white shadow-sm">
+                        {{ (current_user.profile.full_name or current_user.email)[0]|upper }}
+                    </div>
+                    <span class="hidden lg:block text-xs font-medium text-[#00000099]">Me ▾</span>
+                </a>
+                <a href="{{ url_for('auth.logout') }}" class="text-xs font-medium text-[#66615b] hover:text-[#000000e6] transition px-2 py-1 hidden sm:block">Sign out</a>
+                {% else %}
+                <a href="{{ url_for('auth.login') }}" class="li-btn-outline text-xs py-1.5 px-4">Sign in</a>
+                <a href="{{ url_for('auth.register') }}" class="li-btn-primary text-xs py-1.5 px-4">Join now</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="max-w-[1128px] mx-auto px-4 pt-3 w-full">
+            {% for category, message in messages %}
+            <div class="mb-2 px-4 py-2.5 rounded text-sm font-medium
+                {% if category == 'success' %} bg-[#d4edda] text-[#155724]
+                {% elif category == 'error' or category == 'danger' %} bg-[#f8d7da] text-[#721c24]
+                {% else %} bg-[#d1ecf1] text-[#0c5460] {% endif %}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    {% endwith %}
+
+    <main class="flex-1">{% block content %}{% endblock %}</main>
+
+    <footer class="bg-white border-t border-[#e0dfdc] mt-auto">
+        <div class="max-w-[1128px] mx-auto px-4 py-4">
+            <p class="text-center text-xs text-[#999589]">JobMatch AI — Dissertation Project · Powered by Semantic Search &amp; Agentic AI</p>
+        </div>
+    </footer>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
