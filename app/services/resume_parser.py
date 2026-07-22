@@ -292,29 +292,33 @@ def _try_structured(client, model, input_text):
     Returns the response, or raises BadRequestError if the model
     does not support structured outputs.
     """
-    return client.responses.create(
+    return client.chat.completions.create(
         model=model,
-        instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
-        input=input_text,
-        text={
-            "format": {
-                "type": "json_schema",
+        messages=[
+            {"role": "system", "content": "You are a precise resume parser. Return only valid JSON, no markdown formatting."},
+            {"role": "user", "content": input_text},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
                 "name": "resume_extraction",
                 "schema": _build_resume_schema(),
                 "strict": True,
-            }
+            },
         },
-        max_output_tokens=1500,
+        max_tokens=1500,
     )
 
 
 def _try_plain(client, model, input_text):
     """Fallback to plain JSON prompting."""
-    return client.responses.create(
+    return client.chat.completions.create(
         model=model,
-        instructions="You are a precise resume parser. Return only valid JSON, no markdown formatting.",
-        input=input_text,
-        max_output_tokens=1500,
+        messages=[
+            {"role": "system", "content": "You are a precise resume parser. Return only valid JSON, no markdown formatting."},
+            {"role": "user", "content": input_text},
+        ],
+        max_tokens=1500,
     )
 
 
@@ -413,7 +417,14 @@ def parse_resume_with_llm(resume_text: str) -> dict:
     except Exception as e:
         raise ResumeProviderError("Resume processing is temporarily unavailable. Please try again later.") from e
 
-    return _parse_response_json(getattr(response, 'output_text', None))
+    # Extract text from chat completions response
+    raw_output = None
+    if hasattr(response, 'choices') and response.choices:
+        raw_output = response.choices[0].message.content
+    else:
+        raw_output = getattr(response, 'output_text', None)
+
+    return _parse_response_json(raw_output)
 
 
 def _normalize_parsed(data: dict) -> dict:

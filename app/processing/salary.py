@@ -37,6 +37,22 @@ CURRENCY_MAP: dict[str, str] = {
     "pln": "PLN",
 }
 
+GBP_RATES = {
+    "GBP": 1.0, "USD": 0.78, "EUR": 0.84, "INR": 0.0093,
+    "AUD": 0.51, "CAD": 0.57, "NZD": 0.47, "CHF": 0.88, "SGD": 0.58,
+}
+PERIOD_MULTIPLIERS = {"annual": 1, "monthly": 12, "weekly": 52, "daily": 260, "hourly": 1950}
+
+
+def annualise_salary_gbp(value: float | None, currency: str | None, period: str | None) -> float | None:
+    """Convert a salary value to approximate annual GBP using documented static rates."""
+    if value is None or not currency or currency not in GBP_RATES:
+        return None
+    multiplier = PERIOD_MULTIPLIERS.get(period or "annual")
+    if multiplier is None:
+        return None
+    return round(float(value) * GBP_RATES[currency] * multiplier, 2)
+
 MULTIPLIERS: dict[str, float] = {
     "k": 1_000, "K": 1_000,
     "m": 1_000_000, "M": 1_000_000,

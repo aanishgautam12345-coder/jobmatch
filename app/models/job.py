@@ -22,6 +22,10 @@ class RawJob(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)      # entire raw record
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    ingestion_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ingestion_runs.id", ondelete="SET NULL"), index=True
+    )
+    processing_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     __table_args__ = (
         Index("ix_raw_source_job", "source", "source_job_id", unique=True),

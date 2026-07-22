@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}JobMatch AI{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -83,6 +84,11 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
                     <span>For You</span>
                 </a>
+                {% if current_user.is_admin %}
+                <a href="{{ url_for('admin.ingestion_runs') }}" class="nav-link {% if request.blueprint == 'admin' %}nav-active{% endif %}">
+                    <span class="text-lg">Admin</span>
+                </a>
+                {% endif %}
             </div>
             {% endif %}
 
@@ -126,5 +132,21 @@
         </div>
     </footer>
     {% block extra_scripts %}{% endblock %}
+    <script>
+    async function toggleSave(jobId, btn) {
+        const isSaved = btn.dataset.saved === 'true';
+        const url = isSaved ? `/jobs/unsave/${jobId}` : `/jobs/save/${jobId}`;
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+        });
+        const data = await res.json();
+        btn.dataset.saved = data.saved;
+        btn.innerHTML = data.saved
+            ? '<svg class="w-5 h-5 fill-brand-600 text-brand-600" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>'
+            : '<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>';
+    }
+    </script>
 </body>
 </html>

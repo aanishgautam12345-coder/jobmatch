@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -22,14 +23,23 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User, UserProfile, NotificationPreference
-from app.core.security import hash_password, verify_password, create_access_token, decode_access_token, get_token_jti
+from app.core.security import hash_password, verify_password, create_access_token, decode_access_token
 from app.core.deps import get_current_user
 from app.models.token_blacklist import blacklist_token
+from app.services.password_reset import (
+    GENERIC_RESET_MESSAGE,
+    InvalidPasswordError,
+    InvalidResetTokenError,
+    request_password_reset,
+    reset_password as consume_password_reset,
+    validate_password,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
+oauth2_scheme_from_header = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 # ── Request/Response schemas ──
@@ -64,7 +74,12 @@ class MessageResponse(BaseModel):
 @limiter.limit("5/minute")
 def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
     """Create a new user account with profile and notification preferences."""
-    existing = db.query(User).filter(User.email == req.email).first()
+    email = req.email.strip().lower()
+    try:
+        validate_password(req.password)
+    except InvalidPasswordError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    existing = db.query(User).filter(User.email == email).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -73,7 +88,7 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
 
     user = User(
         id=uuid.uuid4(),
-        email=req.email,
+        email=email,
         password_hash=hash_password(req.password),
     )
     db.add(user)
@@ -97,7 +112,7 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
     db.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    logger.info(f"User registered: {req.email}")
+    logger.info("User registered: user_id=%s", user.id)
     return TokenResponse(access_token=token)
 
 
@@ -105,10 +120,10 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
 @limiter.limit("5/minute")
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate a user and return a JWT token."""
-    user = db.query(User).filter(User.email == req.email).first()
+    user = db.query(User).filter(User.email == req.email.strip().lower()).first()
 
     if not user or not verify_password(req.password, user.password_hash):
-        logger.warning(f"Failed login attempt for {req.email}")
+        logger.warning("Failed login attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -121,7 +136,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
         )
 
     token = create_access_token(data={"sub": str(user.id)})
-    logger.info(f"User logged in: {req.email}")
+    logger.info("User logged in: user_id=%s", user.id)
     return TokenResponse(access_token=token)
 
 
@@ -140,61 +155,27 @@ def logout(
                 db, jti, user.id, reason="logout",
                 expires_at=datetime.utcfromtimestamp(payload.get("exp", 0)),
             )
-    logger.info(f"User logged out: {user.email}")
+            db.commit()
+    logger.info("User logged out: user_id=%s", user.id)
     return MessageResponse(message="Successfully logged out")
-
-
-# Re-export the OAuth2 scheme for the logout endpoint
-from fastapi.security import OAuth2PasswordBearer
-oauth2_scheme_from_header = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 @router.post("/forgot", response_model=MessageResponse)
 @limiter.limit("3/minute")
 def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Request a password reset. Always returns success to avoid email enumeration."""
-    user = db.query(User).filter(User.email == req.email).first()
-
-    if not user:
-        return MessageResponse(message="If that email exists, a reset link has been sent.")
-
-    reset_token = create_access_token(
-        data={"sub": str(user.id), "purpose": "reset"},
-        expires_minutes=15,
-    )
-
-    logger.info(f"Password reset requested for {req.email}")
-    return MessageResponse(message="If that email exists, a reset link has been sent.")
+    request_password_reset(db, req.email)
+    return MessageResponse(message=GENERIC_RESET_MESSAGE)
 
 
 @router.post("/reset", response_model=MessageResponse)
 @limiter.limit("3/minute")
 def reset_password(request: Request, req: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Reset password using a token from /forgot."""
-    payload = decode_access_token(req.token)
-
-    if not payload or payload.get("purpose") != "reset":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
-        )
-
-    user_id = payload.get("sub")
-    user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Blacklist the reset token so it can't be reused
-    jti = payload.get("jti")
-    if jti:
-        blacklist_token(
-            db, jti, user.id, reason="password_reset",
-            expires_at=datetime.utcfromtimestamp(payload.get("exp", 0)),
-        )
-
-    user.password_hash = hash_password(req.new_password)
-    db.commit()
-
-    logger.info(f"Password reset completed for user {user_id}")
+    try:
+        user = consume_password_reset(db, req.token, req.new_password)
+    except (InvalidResetTokenError, InvalidPasswordError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("Password reset completed for user_id=%s", user.id)
     return MessageResponse(message="Password has been reset successfully.")

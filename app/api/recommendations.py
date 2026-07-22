@@ -143,7 +143,7 @@ def get_recommendation_detail(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -205,7 +205,7 @@ def explain_recommendation(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 

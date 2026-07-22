@@ -109,17 +109,4 @@
         </div>
     </div>
 </div>
-
-<script>
-async function toggleSave(jobId, btn) {
-    const isSaved = btn.dataset.saved === 'true';
-    const url = isSaved ? `/jobs/unsave/${jobId}` : `/jobs/save/${jobId}`;
-    const res = await fetch(url, { method: 'POST' });
-    const data = await res.json();
-    btn.dataset.saved = data.saved;
-    btn.innerHTML = data.saved
-        ? '<svg class="w-5 h-5 fill-brand-600 text-brand-600" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>'
-        : '<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>';
-}
-</script>
 {% endblock %}

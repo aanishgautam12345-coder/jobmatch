@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from app.models.job import Job
 from app.models.user import UserProfile
+from app.processing.skills import _resolve_alias
 from app.services.scoring_config import ScoringWeights, load_weights
 
 
@@ -184,12 +185,16 @@ def _check_hard_constraints(job: Job, constraints: dict) -> list[str]:
 
 
 def _score_skills(user_skills: list[str], job_skills: list[str]) -> tuple[float, list[str], list[str]]:
-    """Skill overlap = |intersection| / |job skills required|."""
+    """Skill overlap = |intersection| / |job skills required|.
+
+    Both user and job skills are alias-resolved before comparison so that
+    e.g. user's "reactjs" matches job's "react", user's "ml" matches "machine learning".
+    """
     if not job_skills:
         return 0.5, [], []
 
-    user_set = {s.lower().strip() for s in user_skills}
-    job_set = {s.lower().strip() for s in job_skills}
+    user_set = {_resolve_alias(s) for s in user_skills}
+    job_set = {_resolve_alias(s) for s in job_skills}
 
     matching = sorted(user_set & job_set)
     missing = sorted(job_set - user_set)

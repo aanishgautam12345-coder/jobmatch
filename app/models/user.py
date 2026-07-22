@@ -17,6 +17,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -80,5 +81,8 @@ class NotificationPreference(Base):
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     min_match_score: Mapped[float] = mapped_column(Float, default=0.70)  # only notify above 70%
     frequency: Mapped[str] = mapped_column(String(20), default="daily")  # instant/daily/weekly
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
+    last_processed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_digest_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     user: Mapped["User"] = relationship(back_populates="notification_pref")

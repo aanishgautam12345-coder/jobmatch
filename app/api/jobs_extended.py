@@ -28,7 +28,7 @@ def save_job(
     db: Session = Depends(get_db),
 ):
     """Save a job to the user's saved list."""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -70,7 +70,7 @@ def get_saved_jobs(
     saved = (
         db.query(SavedJob, Job)
         .join(Job, Job.id == SavedJob.job_id)
-        .filter(SavedJob.user_id == user.id)
+        .filter(SavedJob.user_id == user.id, Job.is_active.is_(True))
         .order_by(SavedJob.saved_at.desc())
         .all()
     )
@@ -115,7 +115,7 @@ def search_by_skills(
         stmt = (
             select(Job.id)
             .join(JobSkill, JobSkill.job_id == Job.id)
-            .where(func.lower(JobSkill.skill).in_(skill_list))
+            .where(Job.is_active.is_(True), func.lower(JobSkill.skill).in_(skill_list))
             .group_by(Job.id)
             .having(func.count(func.distinct(JobSkill.skill)) >= len(skill_list))
         )
@@ -124,7 +124,7 @@ def search_by_skills(
         stmt = (
             select(Job.id)
             .join(JobSkill, JobSkill.job_id == Job.id)
-            .where(func.lower(JobSkill.skill).in_(skill_list))
+            .where(Job.is_active.is_(True), func.lower(JobSkill.skill).in_(skill_list))
             .group_by(Job.id)
         )
 
@@ -135,7 +135,7 @@ def search_by_skills(
 
     jobs = (
         db.query(Job)
-        .filter(Job.id.in_(matching_ids))
+        .filter(Job.id.in_(matching_ids), Job.is_active.is_(True))
         .limit(limit)
         .all()
     )
@@ -175,7 +175,7 @@ def search_by_company(
     pattern = f"%{q}%"
     jobs = (
         db.query(Job)
-        .filter(Job.company.ilike(pattern))
+        .filter(Job.company.ilike(pattern), Job.is_active.is_(True))
         .order_by(Job.created_at.desc())
         .limit(limit)
         .all()
@@ -212,6 +212,7 @@ def get_recent_jobs(
     """Get the most recently added jobs."""
     jobs = (
         db.query(Job)
+        .filter(Job.is_active.is_(True))
         .order_by(Job.created_at.desc())
         .limit(limit)
         .all()
@@ -274,7 +275,7 @@ def search_similar_skills(
             Job.category, Job.url,
             (1 - distance).label("similarity"),
         )
-        .where(Job.embedding.isnot(None))
+        .where(Job.embedding.isnot(None), Job.is_active.is_(True))
         .order_by(distance)
         .limit(limit)
     )

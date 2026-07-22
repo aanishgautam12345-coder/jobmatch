@@ -74,7 +74,19 @@ def rerank_candidates(
         # Include company and location for richer matching
         company = c.get("company", "")
         location = c.get("location_city") or c.get("location_country") or ""
-        doc_text = f"{doc_text} {company} {location}".strip()
+        parts = [doc_text, company, location]
+        # Include skills if available
+        skills = c.get("skills")
+        if skills:
+            if isinstance(skills, list):
+                skills = ", ".join(skills)
+            parts.append(f"Skills: {skills}")
+        # Include a summary of the description if available
+        description = c.get("description")
+        if description:
+            # Take first 300 chars of description for context
+            parts.append(description[:300])
+        doc_text = " | ".join(p for p in parts if p).strip()
         pairs.append((query, doc_text[:MAX_SEQUENCE_LENGTH]))
 
     # Score all pairs

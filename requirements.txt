@@ -1,49 +1,49 @@
 # ── Web Framework ──
-fastapi==0.115.0
-uvicorn[standard]==0.30.0
-flask==3.0.3
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+flask==3.1.0
 flask-login==0.6.3
-flask-wtf==1.2.1
+flask-wtf==1.2.2
 slowapi==0.1.9
 
 # ── PDF Reading (resume parsing) ──
-pypdf==4.3.1
+pypdf==5.4.0
 
 # ── Database ──
-sqlalchemy==2.0.35
-psycopg2-binary==2.9.9
-pgvector==0.3.5
-alembic==1.13.2
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+pgvector==0.3.6
+alembic==1.14.1
 
 # ── Auth ──
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0
-python-multipart==0.0.9
+python-multipart==0.0.18
 
 # ── Data Processing ──
-pandas==2.2.2
-pydantic==2.9.0
-pydantic-settings==2.5.2
+pandas==2.2.3
+pydantic==2.10.5
+pydantic-settings==2.7.1
 python-dotenv==1.0.1
 
 # ── AI / Embeddings ──
-sentence-transformers==3.1.0
-torch==2.4.0
-openai==2.46.0
+sentence-transformers==3.3.1
+torch==2.5.1
+openai==1.61.0
 
 # ── HTTP / Scraping ──
-httpx==0.27.2
+httpx==0.28.1
 feedparser==6.0.11
 
 # ── Email ──
-aiosmtplib==3.0.1
-jinja2==3.1.4
+aiosmtplib==3.0.2
+jinja2==3.1.5
 
 # ── Scheduling ──
-apscheduler==3.10.4
+apscheduler==3.11.0
 
 # ── Utilities ──
-rapidfuzz==3.9.7
+rapidfuzz==3.11.0
 numpy==1.26.4
 python-dateutil==2.9.0
 
@@ -51,5 +51,5 @@ python-dateutil==2.9.0
 # Streamlit removed — Flask frontend is the primary UI (webapp/)
 
 # ── Dev / Testing ──
-pytest==8.3.2
-pytest-asyncio==0.24.0
+pytest==8.3.4
+pytest-asyncio==0.25.0

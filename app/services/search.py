@@ -525,7 +525,7 @@ def evidence_search(
     if alias_conditions:
         job_stmt = (
             select(Job)
-            .where(or_(*alias_conditions))
+            .where(Job.is_active.is_(True), or_(*alias_conditions))
             .limit(limit * 3)  # Over-fetch for dedup
         )
         candidate_jobs = db.execute(job_stmt).scalars().all()
@@ -545,7 +545,7 @@ def evidence_search(
         if skill_job_ids:
             extra_jobs = (
                 db.query(Job)
-                .filter(Job.id.in_(skill_job_ids), ~Job.id.in_([j.id for j in candidate_jobs]))
+                .filter(Job.is_active.is_(True), Job.id.in_(skill_job_ids), ~Job.id.in_([j.id for j in candidate_jobs]))
                 .limit(limit * 3)
                 .all()
             )
@@ -679,7 +679,7 @@ def _semantic_search_with_evidence(
             Job.category, Job.job_type, Job.url, Job.source,
             (1 - distance).label("similarity"),
         )
-        .where(Job.embedding.isnot(None))
+        .where(Job.embedding.isnot(None), Job.is_active.is_(True))
         .order_by(distance)
         .limit(limit)
     )
@@ -733,7 +733,7 @@ def keyword_search(db: Session, query: str, limit: int = 10) -> list[dict]:
             Job.category, Job.url, Job.source,
             rank.label("fts_rank"),
         )
-        .where(Job.search_vector.op("@@")(tsquery_expr))
+        .where(Job.is_active.is_(True), Job.search_vector.op("@@")(tsquery_expr))
         .order_by(rank.desc())
         .limit(limit)
     )
@@ -785,7 +785,7 @@ def semantic_search(
             Job.category, Job.job_type, Job.url, Job.source,
             (1 - distance).label("similarity"),
         )
-        .where(Job.embedding.isnot(None))
+        .where(Job.embedding.isnot(None), Job.is_active.is_(True))
         .order_by(distance)
         .limit(limit)
     )
@@ -845,8 +845,9 @@ def hybrid_search(
         Job.salary_min, Job.salary_max, Job.salary_currency,
         Job.salary_period, Job.original_salary_text,
         Job.category, Job.job_type, Job.url, Job.source,
+        Job.description,
         (1 - distance).label("similarity"),
-    ).where(Job.embedding.isnot(None))
+    ).where(Job.embedding.isnot(None), Job.is_active.is_(True))
 
     if location_country:
         stmt = stmt.where(Job.location_country.ilike(f"%{location_country}%"))
@@ -879,6 +880,7 @@ def hybrid_search(
             "job_type": row.job_type,
             "url": row.url,
             "source": row.source,
+            "description": row.description or "",
             "similarity": round(float(row.similarity), 4),
             "search_relevance_score": round(float(row.similarity) * 100, 1),
             "ranking_score": round(float(row.similarity) * 100, 1),
@@ -891,6 +893,19 @@ def hybrid_search(
     ]
 
     if rerank and jobs:
+        # Enrich candidates with skills for better reranking
+        job_ids = [j["id"] for j in jobs]
+        skill_rows = (
+            db.query(JobSkill.job_id, JobSkill.skill)
+            .filter(JobSkill.job_id.in_(job_ids))
+            .all()
+        )
+        skills_by_job: dict[str, list[str]] = {}
+        for row in skill_rows:
+            skills_by_job.setdefault(str(row.job_id), []).append(row.skill)
+        for job in jobs:
+            job["skills"] = skills_by_job.get(job["id"], [])
+
         from app.services.reranker import rerank_candidates
         jobs = rerank_candidates(query, jobs, top_n=limit)
         for job in jobs:
@@ -903,7 +918,7 @@ def hybrid_search(
 
 def find_similar_jobs(db: Session, job_id: str, limit: int = 5) -> list[dict]:
     """Find jobs similar to a given job (e.g. 'More like this')."""
-    reference = db.query(Job).filter(Job.id == job_id).first()
+    reference = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
     if not reference or reference.embedding is None:
         return []
 
@@ -915,7 +930,7 @@ def find_similar_jobs(db: Session, job_id: str, limit: int = 5) -> list[dict]:
             Job.location_city, Job.remote, Job.category, Job.url,
             (1 - distance).label("similarity"),
         )
-        .where(Job.embedding.isnot(None))
+        .where(Job.embedding.isnot(None), Job.is_active.is_(True))
         .where(Job.id != job_id)
         .order_by(distance)
         .limit(limit)
@@ -936,3 +951,46 @@ def find_similar_jobs(db: Session, job_id: str, limit: int = 5) -> list[dict]:
         }
         for row in results
     ]
+
+
+def personalized_search(
+    db: Session, query: str, profile, *, location_country: str | None = None,
+    remote_only: bool = False, category: str | None = None,
+    min_salary: float | None = None, threshold: float = 0.35,
+    limit: int = 20, offset: int = 0,
+) -> list[dict]:
+    """Blend manual-query evidence with existing profile recommendation scores."""
+    from app.services.recommendation import compute_match_score
+
+    candidates = hybrid_search(
+        db, query=query, location_country=location_country,
+        remote_only=remote_only, category=category, min_salary=min_salary,
+        limit=min(100, offset + limit * 3),
+    )
+    ranked = []
+    query_lower = query.strip().lower()
+    for result in candidates:
+        job = db.query(Job).filter(Job.id == result["id"], Job.is_active.is_(True)).first()
+        if not job:
+            continue
+        skills = [row.skill for row in db.query(JobSkill).filter(JobSkill.job_id == job.id).all()]
+        breakdown = compute_match_score(
+            profile, job, skills, result["similarity"], profile.preferred_job_types,
+        )
+        if breakdown.overall_score < threshold:
+            continue
+        query_score = max(0.0, min(1.0, result["similarity"]))
+        result["profile_match_score"] = round(breakdown.overall_score * 100, 1)
+        result["match_percentage"] = result["profile_match_score"]
+        result["ranking_score"] = round((breakdown.overall_score * 0.7 + query_score * 0.3) * 100, 1)
+        title = (job.title_clean or job.title or "").lower()
+        description = (job.description or "").lower()
+        if query_lower and query_lower in title:
+            result["match_type"] = "exact_title"
+        elif query_lower and query_lower in description:
+            result["match_type"] = "exact_description"
+        else:
+            result["match_type"] = "semantic_fallback"
+        ranked.append(result)
+    ranked.sort(key=lambda row: (-row["ranking_score"], row["id"]))
+    return ranked[offset:offset + limit]

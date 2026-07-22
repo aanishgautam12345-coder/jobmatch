@@ -30,6 +30,7 @@ def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
         minutes=expires_minutes or settings.access_token_expire_minutes
     )
     to_encode = {**data, "exp": expire, "iat": datetime.utcnow()}
+    to_encode.setdefault("purpose", "access")
     # Add jti (JWT ID) for token revocation support
     import uuid
     to_encode["jti"] = str(uuid.uuid4())

@@ -78,9 +78,7 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             # Ensure pgvector extension is available
-            connection.execute(
-                "CREATE EXTENSION IF NOT EXISTS vector"
-            )
+            connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
             context.run_migrations()
 
 

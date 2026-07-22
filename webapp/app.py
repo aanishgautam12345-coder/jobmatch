@@ -123,11 +123,13 @@ def create_app():
     from webapp.routes.main import main_bp
     from webapp.routes.jobs import jobs_bp
     from webapp.routes.profile import profile_bp
+    from webapp.routes.admin import admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(admin_bp)
 
     logger.info("Flask app created with CSRF protection")
     return app

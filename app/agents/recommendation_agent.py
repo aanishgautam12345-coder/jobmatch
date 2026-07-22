@@ -212,7 +212,7 @@ class RecommendationAgent:
 
         stmt = (
             select(Job, (1 - distance).label("similarity"))
-            .where(Job.embedding.isnot(None))
+            .where(Job.embedding.isnot(None), Job.is_active.is_(True))
             .order_by(distance)
             .limit(limit)
         )
@@ -256,11 +256,16 @@ class RecommendationAgent:
         candidate_dicts = []
         for item in scored:
             job = item["job"]
+            # Fetch skills for this job
+            job_skills = [s.skill for s in
+                         self.db.query(JobSkill).filter(JobSkill.job_id == job.id).all()]
             candidate_dicts.append({
                 "title": job.title_clean or job.title,
                 "company": job.company or "",
                 "location_city": job.location_city or "",
                 "location_country": job.location_country or "",
+                "skills": job_skills,
+                "description": job.description or "",
                 "_original_item": item,
             })
 

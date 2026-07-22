@@ -63,11 +63,8 @@ The LLM feature (RAG explanations + resume parsing) requires an OpenAI API key.
 alembic upgrade head
 ```
 
-### 6. Initialise database and seed data
+### 6. Seed data
 ```bash
-# Create tables
-python -m scripts.init_db
-
 # Import CSV dataset
 python -m scripts.seed_csv                  # all rows
 python -m scripts.seed_csv --limit 500      # first 500 rows (for testing)
@@ -94,6 +91,73 @@ python -m scripts.run_ablation             # ablation study
 ### 10. Run tests
 ```bash
 python -m pytest tests/ -v
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and set values for the services you use. Never
+commit `.env`. Important settings include:
+
+- `DATABASE_URL`, `SECRET_KEY`, `APP_BASE_URL`
+- `OPENAI_API_KEY` and `OPENAI_MODEL`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM`
+- `PASSWORD_RESET_EXPIRY_MINUTES` (15 by default)
+- `SCHEDULER_ENABLED`, scheduler timezone and delivery times
+- `NOTIFICATION_MAX_RETRIES`, `NOTIFICATION_DIGEST_LIMIT`
+- `RECOMMENDED_SEARCH_THRESHOLD`
+
+## Password Recovery
+
+The Flask login page links to `/auth/forgot-password`. Existing active accounts
+receive a purpose-restricted, single-use reset link through SMTP. The link uses
+`APP_BASE_URL` and expires after `PASSWORD_RESET_EXPIRY_MINUTES`. Responses are
+identical for known and unknown addresses. If SMTP is unavailable, the request
+still receives the generic response and no delivery is claimed.
+
+## Administrator Setup
+
+Run migrations first, then explicitly grant an existing trusted account admin
+status in PostgreSQL:
+
+```sql
+UPDATE users SET is_admin = TRUE WHERE email = 'administrator@example.com';
+```
+
+Admin status is never inferred from an email address. Administrators can use
+`/admin/ingestion-runs`, `/admin/jobs`, `/admin/reprocess`, and `/admin/aliases`.
+The equivalent JSON API is under `/api/admin`. Reprocessing requires confirmation
+and has a maximum batch size of 500; original raw payloads are retained.
+
+## Notification Scheduler
+
+Notifications run in one dedicated process, not inside Flask or FastAPI workers:
+
+```bash
+python -m scripts.run_scheduler
+```
+
+Set `SCHEDULER_ENABLED=true` only for that process. Instant, daily, and weekly
+jobs respect each user's profile preference. Notification rows are reserved as
+pending and become sent only after SMTP succeeds; failed attempts are retained
+for bounded retry. Saved-job and changed-top-recommendation updates are included
+in email delivery. Configure SMTP separately; automated tests mock delivery and
+do not prove that real credentials work.
+
+## Recommended Search
+
+Signed-in Flask users can enable **Recommended for me** on manual job search.
+The filter requires a usable profile, keeps location, remote, category, and
+salary filters, blends query relevance with the existing recommendation score,
+and displays a profile match percentage. FastAPI clients can pass
+`recommended=true` to `/api/jobs/search/hybrid` with a bearer token.
+
+## Verification
+
+```bash
+alembic upgrade head
+python -m compileall -q app webapp scripts tests
+python -m pytest -q
+git diff --check
 ```
 
 ---

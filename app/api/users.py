@@ -1,13 +1,19 @@
 ﻿"""Users API â€” profile management for authenticated users."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User, UserProfile, NotificationPreference
 from app.core.deps import get_current_user
+from app.processing.skills import normalize_user_skills
 from app.services.embedding import build_profile_text, generate_embedding
+from app.services.preferences import (
+    validate_job_types,
+    validate_notification_frequency,
+    validate_notification_score,
+)
 
 router = APIRouter()
 
@@ -24,11 +30,26 @@ class ProfileUpdate(BaseModel):
     salary_currency: str | None = None
     career_interests: str | None = None
 
+    @field_validator("preferred_job_types")
+    @classmethod
+    def valid_job_types(cls, value):
+        return validate_job_types(value) if value is not None else value
+
 
 class NotificationPrefUpdate(BaseModel):
     email_enabled: bool | None = None
     min_match_score: float | None = None
     frequency: str | None = None
+
+    @field_validator("min_match_score")
+    @classmethod
+    def valid_score(cls, value):
+        return validate_notification_score(value) if value is not None else value
+
+    @field_validator("frequency")
+    @classmethod
+    def valid_frequency(cls, value):
+        return validate_notification_frequency(value) if value is not None else value
 
 
 class ProfileResponse(BaseModel):
@@ -82,7 +103,9 @@ def update_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     # Update fields that were provided
-    for field, value in update.dict(exclude_unset=True).items():
+    for field, value in update.model_dump(exclude_unset=True).items():
+        if field == "skills" and value is not None:
+            value = normalize_user_skills(value)
         setattr(profile, field, value)
 
     # Recompute embedding
@@ -123,9 +146,10 @@ def update_notification_prefs(
         NotificationPreference.user_id == user.id
     ).first()
     if not prefs:
-        raise HTTPException(status_code=404, detail="Notification preferences not found")
+        prefs = NotificationPreference(user_id=user.id)
+        db.add(prefs)
 
-    for field, value in update.dict(exclude_unset=True).items():
+    for field, value in update.model_dump(exclude_unset=True).items():
         setattr(prefs, field, value)
 
     db.commit()

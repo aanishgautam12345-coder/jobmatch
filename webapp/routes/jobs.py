@@ -7,8 +7,10 @@ from flask_login import login_required, current_user
 
 from app.database import SessionLocal
 from app.models.job import Job, JobSkill
+from app.models.user import UserProfile
 from app.models.recommendation import SavedJob
-from app.services.search import evidence_search, semantic_search, keyword_search, hybrid_search, format_salary_display
+from app.models.user import UserProfile
+from app.services.search import evidence_search, semantic_search, keyword_search, hybrid_search, personalized_search, format_salary_display
 from app.agents.recommendation_agent import RecommendationAgent
 from app.services.recommendation import compute_match_score
 from app.services.rag import generate_explanation
@@ -24,18 +26,39 @@ def search():
     country = request.args.get("country", "").strip()
     category = request.args.get("category", "")
     remote_only = request.args.get("remote_only") == "on"
+    recommended = request.args.get("recommended") == "on"
+    min_salary = request.args.get("min_salary", type=float)
+    page = max(request.args.get("page", 1, type=int), 1)
+    page_size = 20
+    profile_message = None
 
     results = []
     if query:
         db = SessionLocal()
         try:
-            if country or category or remote_only:
+            if recommended:
+                profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+                if not profile or profile.profile_embedding is None or (not profile.skills and not profile.headline):
+                    profile_message = "Complete your profile before using Recommended for me."
+                else:
+                    from app.config import get_settings
+                    results = personalized_search(
+                        db, query, profile, location_country=country or None,
+                        remote_only=remote_only, category=category or None,
+                        min_salary=min_salary,
+                        threshold=get_settings().recommended_search_threshold,
+                        limit=page_size, offset=(page - 1) * page_size,
+                    )
+            elif country or category or remote_only or min_salary:
                 results = hybrid_search(
                     db, query=query, location_country=country or None,
-                    remote_only=remote_only, category=category or None, limit=20,
+                    remote_only=remote_only, category=category or None,
+                    min_salary=min_salary, limit=page * page_size,
                 )
+                results = results[(page - 1) * page_size:]
             else:
-                results = evidence_search(db, query=query, limit=20)
+                results = evidence_search(db, query=query, limit=page * page_size)
+                results = results[(page - 1) * page_size:]
 
             saved_ids = {
                 str(s.job_id) for s in
@@ -54,6 +77,8 @@ def search():
         "main/search.html", query=query, results=results,
         categories=CATEGORIES, selected_category=category,
         country=country, remote_only=remote_only,
+        recommended=recommended, min_salary=min_salary, page=page,
+        profile_message=profile_message,
     )
 
 
@@ -88,7 +113,7 @@ def job_detail(job_id):
     """Full job detail page with description, skills, match breakdown, and similar jobs."""
     db = SessionLocal()
     try:
-        job = db.query(Job).filter(Job.id == job_id).first()
+        job = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
         if not job:
             return "Job not found", 404
 
@@ -107,7 +132,7 @@ def job_detail(job_id):
                 SELECT id, title, title_clean, company, location_city, location_country, remote, category,
                        (1 - (embedding <=> :embedding)) AS similarity
                 FROM jobs
-                WHERE id != :job_id AND embedding IS NOT NULL
+                WHERE id != :job_id AND embedding IS NOT NULL AND is_active = true
                 ORDER BY embedding <=> :embedding
                 LIMIT 5
             """)
@@ -147,7 +172,7 @@ def explain(job_id):
     db = SessionLocal()
     try:
         profile = current_user.profile
-        job = db.query(Job).filter(Job.id == job_id).first()
+        job = db.query(Job).filter(Job.id == job_id, Job.is_active.is_(True)).first()
         if not job or not profile:
             return jsonify({"error": "Not found"}), 404
 
@@ -211,7 +236,7 @@ def saved():
         rows = (
             db.query(SavedJob, Job)
             .join(Job, Job.id == SavedJob.job_id)
-            .filter(SavedJob.user_id == current_user.id)
+            .filter(SavedJob.user_id == current_user.id, Job.is_active.is_(True))
             .order_by(SavedJob.saved_at.desc())
             .all()
         )
@@ -225,7 +250,7 @@ def saved():
 def recent():
     db = SessionLocal()
     try:
-        jobs = db.query(Job).order_by(Job.created_at.desc()).limit(30).all()
+        jobs = db.query(Job).filter(Job.is_active.is_(True)).order_by(Job.created_at.desc()).limit(30).all()
         saved_ids = {
             str(s.job_id) for s in
             db.query(SavedJob).filter(SavedJob.user_id == current_user.id).all()

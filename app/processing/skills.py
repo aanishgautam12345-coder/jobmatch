@@ -169,6 +169,22 @@ def _resolve_alias(skill: str) -> str:
     return _ALIAS_LOOKUP.get(skill.lower(), skill.lower())
 
 
+def normalize_user_skills(skills: list[str]) -> list[str]:
+    """Normalize a list of user-entered skills to canonical forms.
+
+    Applies alias resolution so that e.g. "ReactJS" -> "react", "ML" -> "machine learning".
+    Deduplicates and sorts alphabetically.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for skill in skills:
+        canonical = _resolve_alias(skill)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    return sorted(result)
+
+
 def _classify_context(text: str, skill: str) -> tuple[str, bool]:
     """Classify skill as essential/preferred/desirable based on surrounding text context.
 

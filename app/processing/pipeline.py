@@ -20,6 +20,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.job import RawJob, Job, JobSkill
+from app.models.job_posting import JobPosting
+from app.models.normalization_alias import NormalizationAlias
 from app.models.ingestion_run import IngestionRun
 from app.models.processing_error import ProcessingError
 from app.processing.title import clean_title
@@ -39,6 +41,7 @@ def process_raw_jobs(
     limit: int | None = None,
     generate_embeddings: bool = True,
     source: str | None = None,
+    raw_job_ids: list[uuid.UUID] | None = None,
 ) -> dict:
     """Process all unprocessed raw_jobs into clean jobs.
 
@@ -63,6 +66,8 @@ def process_raw_jobs(
     query = db.query(RawJob).filter(RawJob.processed == False)  # noqa: E712
     if source:
         query = query.filter(RawJob.source == source)
+    if raw_job_ids is not None:
+        query = query.filter(RawJob.id.in_(raw_job_ids))
     if limit:
         query = query.limit(limit)
 
@@ -85,7 +90,9 @@ def process_raw_jobs(
 
     for i, raw in enumerate(raw_jobs, 1):
         try:
-            job = _process_single(raw, generate_embeddings)
+            raw.processing_attempts = (raw.processing_attempts or 0) + 1
+            raw.ingestion_run_id = run.id
+            job = _process_single(raw, generate_embeddings, db)
 
             if job is None:
                 skipped_dupes += 1
@@ -95,8 +102,36 @@ def process_raw_jobs(
 
             dedup_hash = job["dedup_hash"]
 
+            original_job = db.query(Job).filter(Job.raw_job_id == raw.id).first()
+            if original_job:
+                quality = score_job(
+                    title=job.get("title_clean"), company=job.get("company"),
+                    description=job.get("description"), location_city=job.get("location_city"),
+                    location_country=job.get("location_country"), salary_min=job.get("salary_min"),
+                    salary_max=job.get("salary_max"), category=job.get("category"),
+                    job_type=job.get("job_type"), experience_level=job.get("experience_level"),
+                    skills=job.get("skills"), posted_at=job.get("posted_at"),
+                    url=job.get("url"), source=raw.source,
+                )
+                collision = db.query(Job).filter(
+                    Job.dedup_hash == dedup_hash, Job.id != original_job.id
+                ).first()
+                _update_existing_job(original_job, job, quality.overall, update_hash=not collision)
+                original_job.skills.clear()
+                for skill_name in job.get("skills", []):
+                    original_job.skills.append(JobSkill(id=uuid.uuid4(), skill=skill_name))
+                _upsert_posting(db, original_job, raw, job)
+                raw.processed = True
+                db.commit()
+                quality_scores.append(quality.overall)
+                inserted += 1
+                continue
+
             if dedup_hash in seen_hashes:
                 skipped_dupes += 1
+                existing = db.query(Job).filter(Job.dedup_hash == dedup_hash).first()
+                if existing:
+                    _upsert_posting(db, existing, raw, job)
                 raw.processed = True
                 db.commit()
                 continue
@@ -105,6 +140,7 @@ def process_raw_jobs(
             if existing:
                 skipped_dupes += 1
                 seen_hashes.add(dedup_hash)
+                _upsert_posting(db, existing, raw, job)
                 raw.processed = True
                 db.commit()
                 continue
@@ -140,10 +176,18 @@ def process_raw_jobs(
                 location_city=job["location_city"],
                 location_country=job["location_country"],
                 remote=job["remote"],
+                uk_country=job.get("uk_country"),
+                uk_region=job.get("uk_region"),
+                county=job.get("county"),
+                postcode_area=job.get("postcode_area"),
+                workplace_type=job.get("workplace_type"),
                 salary_min=job["salary_min"],
                 salary_max=job["salary_max"],
                 salary_currency=job["salary_currency"],
                 salary_period=job["salary_period"],
+                original_salary_text=job.get("original_salary_text"),
+                annualised_gbp_salary=job.get("annualised_gbp_salary"),
+                salary_confidence=job.get("salary_confidence"),
                 category=job["category"],
                 job_type=job.get("job_type"),
                 experience_level=job.get("experience_level"),
@@ -153,8 +197,11 @@ def process_raw_jobs(
                 dedup_hash=dedup_hash,
                 embedding=job.get("embedding"),
                 quality_score=quality.overall,
+                processing_version="2.0",
             )
             db.add(new_job)
+            db.flush()
+            _upsert_posting(db, new_job, raw, job)
 
             for skill_name in job.get("skills", []):
                 db.add(JobSkill(
@@ -182,7 +229,9 @@ def process_raw_jobs(
                 error=e,
             )
             try:
-                raw.processed = True
+                # Leave failed records retryable; the attempt and error are retained.
+                raw.processed = False
+                raw.processing_attempts = (raw.processing_attempts or 0) + 1
                 db.commit()
             except Exception:
                 db.rollback()
@@ -211,7 +260,7 @@ def process_raw_jobs(
     return summary
 
 
-def _process_single(raw: RawJob, generate_emb: bool) -> dict | None:
+def _process_single(raw: RawJob, generate_emb: bool, db: Session | None = None) -> dict | None:
     """Process a single raw job through all processors."""
     payload = raw.payload
 
@@ -225,6 +274,7 @@ def _process_single(raw: RawJob, generate_emb: bool) -> dict | None:
     raw_posted = payload.get("posted_at", "")
     raw_salary_min = payload.get("salary_min")
     raw_salary_max = payload.get("salary_max")
+    raw_salary_currency = payload.get("salary_currency")
     raw_contract_type = payload.get("contract_type")
     raw_contract_time = payload.get("contract_time")
     raw_experience_level = payload.get("experience_level")
@@ -239,8 +289,12 @@ def _process_single(raw: RawJob, generate_emb: bool) -> dict | None:
         raw_description,
         source_min=raw_salary_min,
         source_max=raw_salary_max,
+        source_currency=raw_salary_currency,
     )
 
+    if db:
+        raw_location = _resolve_alias(db, "location", raw_location)
+        raw_category = _resolve_alias(db, "category", raw_category)
     location = normalise_location(raw_location, raw_description)
     if is_remote:
         location["remote"] = True
@@ -272,10 +326,18 @@ def _process_single(raw: RawJob, generate_emb: bool) -> dict | None:
         "location_city": location["city"],
         "location_country": location["country"],
         "remote": location["remote"],
+        "uk_country": location.get("uk_country"),
+        "uk_region": location.get("uk_region"),
+        "county": location.get("county"),
+        "postcode_area": location.get("postcode_area"),
+        "workplace_type": location.get("workplace_type"),
         "salary_min": salary.min_salary,
         "salary_max": salary.max_salary,
         "salary_currency": salary.currency,
         "salary_period": salary.period,
+        "original_salary_text": salary.original_text,
+        "salary_confidence": salary.confidence,
+        "annualised_gbp_salary": _annualised_salary(salary),
         "category": category,
         "job_type": job_type,
         "experience_level": raw_experience_level or None,
@@ -313,7 +375,10 @@ def _parse_date(date_str: str | None) -> datetime | None:
 
     from dateutil import parser as date_parser
     try:
-        return date_parser.parse(date_str)
+        parsed = date_parser.parse(date_str)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
     except (ValueError, TypeError):
         return None
 
@@ -345,3 +410,59 @@ def _log_processing_error(
         db.commit()
     except Exception:
         db.rollback()
+
+
+def _resolve_alias(db: Session, kind: str, value: str | None) -> str | None:
+    if not value:
+        return value
+    mapping = db.query(NormalizationAlias).filter(
+        NormalizationAlias.kind == kind,
+        NormalizationAlias.alias == value.strip().lower(),
+        NormalizationAlias.is_active.is_(True),
+    ).first()
+    return mapping.canonical_value if mapping else value
+
+
+def _annualised_salary(salary) -> float | None:
+    from app.processing.salary import annualise_salary_gbp
+    value = salary.min_salary if salary.min_salary is not None else salary.max_salary
+    return annualise_salary_gbp(value, salary.currency, salary.period)
+
+
+def _upsert_posting(db: Session, canonical_job: Job, raw: RawJob, processed: dict) -> None:
+    posting = db.query(JobPosting).filter(JobPosting.raw_job_id == raw.id).first()
+    if not posting:
+        posting = JobPosting(id=uuid.uuid4(), raw_job_id=raw.id)
+    posting.canonical_job_id = canonical_job.id
+    posting.source = raw.source
+    posting.source_job_id = raw.source_job_id
+    posting.source_url = processed.get("url")
+    posting.original_title = raw.payload.get("job_title")
+    posting.original_description = raw.payload.get("job_description")
+    posting.original_location = raw.payload.get("location_display")
+    posting.original_salary_text = processed.get("original_salary_text")
+    posting.original_currency = processed.get("salary_currency")
+    posting.original_company = raw.payload.get("company")
+    posting.payload = raw.payload
+    posting.posted_at = processed.get("posted_at")
+    posting.last_seen_at = datetime.utcnow()
+    posting.is_active = True
+    db.add(posting)
+
+
+def _update_existing_job(job: Job, processed: dict, quality_score: float, update_hash: bool) -> None:
+    fields = (
+        "title", "title_clean", "company", "description", "location_city",
+        "location_country", "remote", "uk_country", "uk_region", "county",
+        "postcode_area", "workplace_type", "salary_min", "salary_max",
+        "salary_currency", "salary_period", "original_salary_text",
+        "annualised_gbp_salary", "salary_confidence", "category", "job_type",
+        "experience_level", "posted_at", "url", "embedding",
+    )
+    for field in fields:
+        setattr(job, field, processed.get(field))
+    if update_hash:
+        job.dedup_hash = processed["dedup_hash"]
+    job.quality_score = quality_score
+    job.processing_version = "2.0"
+    job.updated_at = datetime.utcnow()

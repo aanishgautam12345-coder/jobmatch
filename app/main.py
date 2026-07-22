@@ -62,11 +62,12 @@ def health_check():
 
 
 # Route registration
-from app.api import jobs, auth, users, jobs_extended
+from app.api import jobs, auth, users, jobs_extended, admin
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(jobs_extended.router, prefix="/api/jobs", tags=["Jobs Extended"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 
 from app.api import recommendations
 from app.api import interactions

@@ -8,7 +8,8 @@ Adds a `token_blacklist` table and utility functions to:
 
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Index
+from sqlalchemy import String, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -19,13 +20,13 @@ class TokenBlacklist(Base):
     __tablename__ = "token_blacklist"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        uuid.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     token_jti: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
+        String(64), nullable=False, unique=True, index=True
     )  # JWT "jti" claim (unique token ID)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        uuid.UUID(as_uuid=True), index=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     reason: Mapped[str] = mapped_column(String(50), default="logout")
     # Reasons: logout, password_reset, account_deactivated, security
@@ -34,13 +35,8 @@ class TokenBlacklist(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
-    __table_args__ = (
-        Index("ix_blacklist_jti", "token_jti", unique=True),
-    )
-
-
 def blacklist_token(db, token_jti: str, user_id: uuid.UUID, reason: str = "logout", expires_at: datetime | None = None):
-    """Add a token to the blacklist."""
+    """Stage a token blacklist entry in the caller's transaction."""
     from datetime import timedelta
     entry = TokenBlacklist(
         id=uuid.uuid4(),
@@ -50,7 +46,6 @@ def blacklist_token(db, token_jti: str, user_id: uuid.UUID, reason: str = "logou
         expires_at=expires_at or (datetime.utcnow() + timedelta(hours=24)),
     )
     db.add(entry)
-    db.commit()
 
 
 def is_token_blacklisted(db, token_jti: str) -> bool:

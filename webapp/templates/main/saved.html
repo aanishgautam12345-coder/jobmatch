@@ -65,7 +65,11 @@
 
 <script>
 async function unsave(jobId) {
-    await fetch(`/jobs/unsave/${jobId}`, { method: 'POST' });
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    await fetch(`/jobs/unsave/${jobId}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    });
     const el = document.getElementById(`row-${jobId}`);
     el.style.opacity = '0.5';
     setTimeout(() => el.remove(), 300);

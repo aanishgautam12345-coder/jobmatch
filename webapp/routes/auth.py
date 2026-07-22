@@ -8,6 +8,14 @@ from flask_login import login_user, logout_user, login_required, current_user
 from app.database import SessionLocal
 from app.models.user import User, UserProfile, NotificationPreference
 from app.core.security import hash_password, verify_password
+from app.services.password_reset import (
+    GENERIC_RESET_MESSAGE,
+    InvalidPasswordError,
+    InvalidResetTokenError,
+    request_password_reset,
+    reset_password as consume_password_reset,
+    validate_password,
+)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -28,8 +36,10 @@ def register():
             flash("Email and password are required.", "error")
             return render_template("auth/register.html")
 
-        if len(password) < 8:
-            flash("Password must be at least 8 characters.", "error")
+        try:
+            validate_password(password)
+        except InvalidPasswordError as exc:
+            flash(str(exc), "error")
             return render_template("auth/register.html")
 
         if password != confirm:
@@ -101,6 +111,41 @@ def login():
             db.close()
 
     return render_template("auth/login.html")
+
+
+@auth_bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        db = SessionLocal()
+        try:
+            request_password_reset(db, request.form.get("email", ""))
+        finally:
+            db.close()
+        flash(GENERIC_RESET_MESSAGE, "info")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/forgot_password.html")
+
+
+@auth_bp.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirmation = request.form.get("confirm_password", "")
+        if password != confirmation:
+            flash("Passwords do not match.", "error")
+            return render_template("auth/reset_password.html", token=token)
+        db = SessionLocal()
+        try:
+            consume_password_reset(db, token, password)
+        except (InvalidResetTokenError, InvalidPasswordError) as exc:
+            db.rollback()
+            flash(str(exc), "error")
+            return render_template("auth/reset_password.html", token=token)
+        finally:
+            db.close()
+        flash("Password has been reset. You can now sign in.", "success")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/reset_password.html", token=token)
 
 
 @auth_bp.route("/logout")

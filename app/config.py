@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     secret_key: str = "change-this-to-a-random-string"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
+    app_base_url: str = "http://localhost:5000"
+    password_reset_expiry_minutes: int = 15
 
     # Email
     smtp_host: str = "smtp.gmail.com"
@@ -28,6 +30,18 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     email_from: str = ""
+    smtp_timeout_seconds: int = 10
+
+    # Dedicated notification scheduler process
+    scheduler_enabled: bool = False
+    scheduler_timezone: str = "UTC"
+    scheduler_instant_interval_minutes: int = 15
+    scheduler_daily_time: str = "09:00"
+    scheduler_weekly_day: str = "mon"
+    scheduler_weekly_time: str = "09:00"
+    notification_max_retries: int = 3
+    notification_digest_limit: int = 5
+    recommended_search_threshold: float = 0.35
 
     # Embedding model - BGE is optimized for retrieval/search tasks
     embedding_model: str = "BAAI/bge-base-en-v1.5"

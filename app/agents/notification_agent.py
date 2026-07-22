@@ -1,291 +1,243 @@
+"""Frequency-aware, idempotent email notification agent."""
+
 import logging
-"""Notification Agent — the autonomous alerting layer.
-
-Runs on a schedule (e.g. hourly/daily via APScheduler). For each active user:
-    1. Find jobs added since the last run
-    2. Score those jobs against the user's profile (reuses RecommendationAgent)
-    3. DECIDE whether each job is worth notifying about:
-         - meets the user's minimum match threshold?
-         - not already notified for this job?
-         - hasn't exceeded their notification rate cap?
-    4. Send a single digest email (not one email per job — anti-spam)
-    5. Log every notification sent
-
-This is what makes it "agentic" rather than a blind alert-on-every-job system:
-the agent actively filters for quality and prevents notification fatigue.
-"""
-
+import uuid
 from datetime import datetime, timedelta
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models.job import Job, JobSkill
-from app.models.user import User, UserProfile, NotificationPreference
 from app.models.notification import Notification
+from app.models.recommendation import Recommendation, SavedJob
+from app.models.user import NotificationPreference, User, UserProfile
+from app.services.email import send_notification_digest
 from app.services.recommendation import compute_match_score
-
+from app.services.search import find_similar_jobs
 
 logger = logging.getLogger(__name__)
-
-# Agent behaviour parameters
-MAX_NOTIFICATIONS_PER_RUN = 5   # Anti-spam: cap per user per run, batch into a digest
-DEFAULT_LOOKBACK_HOURS = 24     # How far back to consider "new" jobs on first run
+DEFAULT_LOOKBACK_HOURS = 24
 
 
 class NotificationAgent:
-    """Autonomous agent that decides which new jobs merit notifying users about."""
+    """Select and deliver due notifications without recording false success."""
 
     def __init__(self, db: Session):
         self.db = db
+        self.settings = get_settings()
 
-    def run(self, since: datetime | None = None) -> dict:
-        """Run one notification cycle across all active users.
-
-        Args:
-            since: Only consider jobs created after this time.
-                   Defaults to DEFAULT_LOOKBACK_HOURS ago.
-
-        Returns:
-            Summary dict: {users_checked, notifications_sent, jobs_considered}
-        """
-        if since is None:
-            since = datetime.utcnow() - timedelta(hours=DEFAULT_LOOKBACK_HOURS)
-
-        # Step 1 — find new jobs since last run
+    def run(self, since: datetime | None = None, frequency: str | None = None) -> dict:
+        if frequency is not None and frequency not in {"instant", "daily", "weekly"}:
+            raise ValueError("Unsupported notification frequency")
+        default_hours = 24 * 7 if frequency == "weekly" else DEFAULT_LOOKBACK_HOURS
+        since = since or datetime.utcnow() - timedelta(hours=default_hours)
         new_jobs = self._get_new_jobs(since)
-        logger.info(f"{len(new_jobs)} new jobs since {since}")
-
-        if not new_jobs:
-            return {"users_checked": 0, "notifications_sent": 0, "jobs_considered": 0}
-
-        # Step 2 — get all users with active notification preferences
-        users = self._get_active_users()
-        logger.info(f"Checking {len(users)} active users")
-
-        total_sent = 0
+        users = self._get_active_users(frequency)
+        emails_sent = 0
+        emails_failed = 0
+        notifications_sent = 0
 
         for user in users:
-            sent = self._process_user(user, new_jobs)
-            # Also check the two additional notification types
-            sent += self.check_saved_job_updates(user)
-            sent += self.check_recommendation_updates(user)
-            total_sent += sent
+            result = self._process_user(user, new_jobs)
+            emails_sent += int(result["delivered"])
+            emails_failed += int(result["attempted"] and not result["delivered"])
+            notifications_sent += result["notifications_sent"]
 
-        return {
+        summary = {
             "users_checked": len(users),
-            "notifications_sent": total_sent,
             "jobs_considered": len(new_jobs),
+            "emails_sent": emails_sent,
+            "emails_failed": emails_failed,
+            "notifications_sent": notifications_sent,
         }
+        logger.info("Notification run complete frequency=%s summary=%s", frequency or "all", summary)
+        return summary
 
     def _get_new_jobs(self, since: datetime) -> list[Job]:
-        stmt = select(Job).where(Job.created_at >= since).where(Job.embedding.isnot(None))
+        stmt = select(Job).where(
+            Job.created_at >= since,
+            Job.embedding.isnot(None),
+            Job.is_active.is_(True),
+        )
         return list(self.db.execute(stmt).scalars().all())
 
-    def _get_active_users(self) -> list[User]:
+    def _get_active_users(self, frequency: str | None) -> list[User]:
         stmt = (
             select(User)
             .join(UserProfile, UserProfile.user_id == User.id)
             .join(NotificationPreference, NotificationPreference.user_id == User.id)
-            .where(User.is_active.is_(True))
-            .where(NotificationPreference.email_enabled.is_(True))
+            .where(User.is_active.is_(True), NotificationPreference.email_enabled.is_(True))
         )
+        if frequency:
+            stmt = stmt.where(NotificationPreference.frequency == frequency)
         return list(self.db.execute(stmt).scalars().all())
 
-    def _process_user(self, user: User, new_jobs: list[Job]) -> int:
-        """Score new jobs for one user and decide what to notify about.
-
-        Returns the number of notifications sent (0 or 1 — one digest email).
-        """
+    def _process_user(self, user: User, new_jobs: list[Job]) -> dict:
         profile = self.db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
         prefs = self.db.query(NotificationPreference).filter(
             NotificationPreference.user_id == user.id
         ).first()
+        if not profile or not prefs or not prefs.email_enabled:
+            return {"attempted": False, "delivered": False, "notifications_sent": 0}
 
-        if not profile or not prefs:
-            return 0
-
-        # Ensure the profile has an embedding — don't silently skip users
-        # who haven't triggered a recommendation run yet
         if profile.profile_embedding is None:
             from app.services.embedding import build_profile_text, generate_embedding
-            text = build_profile_text(
-                headline=profile.headline,
-                skills=profile.skills,
+            profile.profile_embedding = generate_embedding(build_profile_text(
+                headline=profile.headline, skills=profile.skills,
                 career_interests=profile.career_interests,
                 experience_level=profile.experience_level,
-            )
-            profile.profile_embedding = generate_embedding(text)
+            ), is_query=True)
             self.db.commit()
-            logger.info(f"Computed missing profile embedding for {user.email}")
 
-        # Score every new job against this user
-        candidates = []
-        for job in new_jobs:
-            # Skip if already notified about this job
-            already_notified = self.db.query(Notification).filter(
-                Notification.user_id == user.id,
-                Notification.job_id == job.id,
-            ).first()
-            if already_notified:
-                continue
+        if prefs.last_processed_at:
+            new_jobs = [job for job in new_jobs if job.created_at >= prefs.last_processed_at]
 
-            similarity = self._cosine_similarity(profile.profile_embedding, job.embedding)
-            job_skills = [s.skill for s in
-                         self.db.query(JobSkill).filter(JobSkill.job_id == job.id).all()]
-            breakdown = compute_match_score(profile, job, job_skills, similarity)
+        candidates = self._new_job_candidates(user, profile, prefs, new_jobs)
+        candidates.extend(self._saved_job_candidates(user))
+        recommendation = self._recommendation_candidate(user)
+        if recommendation:
+            candidates.append(recommendation)
 
-            # DECISION: does this clear the user's personal threshold?
-            if breakdown.overall_score >= prefs.min_match_score:
-                candidates.append((job, breakdown))
-
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        prefs.last_processed_at = datetime.utcnow()
         if not candidates:
-            logger.info(f"No jobs cleared {user.email}'s "
-                  f"{prefs.min_match_score*100:.0f}% threshold")
-            return 0
+            self.db.commit()
+            return {"attempted": False, "delivered": False, "notifications_sent": 0}
+        return self._deliver(user, profile, prefs, candidates)
 
-        # Rank and cap — anti-spam: only the best N, batched into one digest
-        candidates.sort(key=lambda c: c[1].overall_score, reverse=True)
-        candidates = candidates[:MAX_NOTIFICATIONS_PER_RUN]
+    def _new_job_candidates(self, user, profile, prefs, jobs):
+        candidates = []
+        for job in jobs:
+            similarity = self._cosine_similarity(profile.profile_embedding, job.embedding)
+            skills = [row.skill for row in self.db.query(JobSkill).filter(JobSkill.job_id == job.id).all()]
+            breakdown = compute_match_score(
+                profile, job, skills, similarity, profile.preferred_job_types,
+            )
+            if breakdown.overall_score >= prefs.min_match_score:
+                notification_type = "high_match" if breakdown.overall_score >= 0.75 else "new_job"
+                candidates.append((job, breakdown.overall_score, notification_type))
+        return candidates
 
-        # Determine notification type
-        notif_type = "high_match" if candidates[0][1].overall_score >= 0.75 else "new_job"
+    def _saved_job_candidates(self, user):
+        candidates = {}
+        for saved in self.db.query(SavedJob).filter(SavedJob.user_id == user.id).all():
+            for result in find_similar_jobs(self.db, str(saved.job_id), limit=3):
+                if result["similarity"] < 0.85:
+                    continue
+                job = self.db.query(Job).filter(
+                    Job.id == uuid.UUID(result["id"]), Job.is_active.is_(True)
+                ).first()
+                if job:
+                    candidates[job.id] = (job, result["similarity"], "saved_job_update")
+        return list(candidates.values())
 
-        # Send the digest (or log it — email sending is wired separately)
-        self._send_digest(user, profile, candidates, notif_type)
+    def _recommendation_candidate(self, user):
+        current = (
+            self.db.query(Recommendation)
+            .join(Job, Job.id == Recommendation.job_id)
+            .filter(Recommendation.user_id == user.id, Job.is_active.is_(True))
+            .order_by(Recommendation.created_at.desc(), Recommendation.rank.asc())
+            .first()
+        )
+        if not current:
+            return None
+        previous = (
+            self.db.query(Notification)
+            .filter(
+                Notification.user_id == user.id,
+                Notification.type == "recommendation_update",
+                Notification.status == "sent",
+            )
+            .order_by(Notification.sent_at.desc())
+            .first()
+        )
+        if previous and previous.job_id == current.job_id:
+            return None
+        job = self.db.query(Job).filter(Job.id == current.job_id, Job.is_active.is_(True)).first()
+        transition = str(previous.job_id) if previous else "initial"
+        return (job, current.match_score, f"recommendation_update:{transition}") if job else None
 
-        return 1
-
-    def _send_digest(self, user: User, profile: UserProfile,
-                     candidates: list[tuple[Job, object]], notif_type: str):
-        """Send one digest email covering all qualifying jobs, and log each."""
-        import uuid
-        from app.services.email import send_notification_digest
-
-        job_summaries = [
-            {
-                "title": job.title_clean or job.title,
-                "company": job.company,
-                "match_percentage": breakdown.match_percentage,
-                "url": job.url,
-            }
-            for job, breakdown in candidates
-        ]
-
-        # Attempt to send email (fails gracefully if SMTP isn't configured)
-        send_notification_digest(user.email, profile.full_name, job_summaries)
-
-        # Log every notification, regardless of email delivery success
-        for job, breakdown in candidates:
-            self.db.add(Notification(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                job_id=job.id,
-                type=notif_type,
-                match_score=breakdown.overall_score,
-            ))
-
+    def _deliver(self, user, profile, prefs, candidates):
+        digest_id = uuid.uuid4()
+        reserved = []
+        max_retries = self.settings.notification_max_retries
+        for job, score, notification_type in candidates:
+            if len(reserved) >= self.settings.notification_digest_limit:
+                break
+            base_type, _, _ = notification_type.partition(":")
+            dedupe_key = f"{user.id}:{job.id}:{notification_type}"
+            notification = self.db.query(Notification).filter(
+                Notification.dedupe_key == dedupe_key
+            ).first()
+            if notification and (notification.status == "sent" or notification.retry_count >= max_retries):
+                continue
+            if (
+                notification and notification.status == "pending"
+                and notification.attempted_at
+                and notification.attempted_at >= datetime.utcnow() - timedelta(minutes=30)
+            ):
+                continue
+            if not notification:
+                notification = Notification(
+                    id=uuid.uuid4(), user_id=user.id, job_id=job.id,
+                    type=base_type, match_score=score,
+                    dedupe_key=dedupe_key, status="pending", retry_count=0,
+                )
+            notification.digest_id = digest_id
+            notification.status = "pending"
+            notification.attempted_at = datetime.utcnow()
+            notification.retry_count = (notification.retry_count or 0) + 1
+            self.db.add(notification)
+            reserved.append((notification, job, score, base_type))
         self.db.commit()
-        logger.info(f"Sent digest to {user.email}: "
-              f"{len(candidates)} jobs (top match: {candidates[0][1].match_percentage}%)")
+        if not reserved:
+            return {"attempted": False, "delivered": False, "notifications_sent": 0}
+
+        summaries = [{
+            "title": job.title_clean or job.title,
+            "company": job.company,
+            "match_percentage": round(score * 100, 1),
+            "url": job.url,
+            "notification_type": notification_type,
+        } for _, job, score, notification_type in reserved]
+        delivered = send_notification_digest(user.email, profile.full_name, summaries)
+        now = datetime.utcnow()
+        for notification, _, _, _ in reserved:
+            notification.status = "sent" if delivered else "failed"
+            notification.sent_at = now if delivered else None
+            notification.failure_reason = None if delivered else "Email delivery failed"
+        if delivered:
+            prefs.last_digest_sent_at = now
+        self.db.commit()
+        return {
+            "attempted": True, "delivered": delivered,
+            "notifications_sent": len(reserved) if delivered else 0,
+        }
 
     @staticmethod
-    def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-        import numpy as np
+    def _cosine_similarity(vec_a, vec_b) -> float:
         a = np.array(vec_a)
         b = np.array(vec_b)
-        denom = (np.linalg.norm(a) * np.linalg.norm(b))
-        if denom == 0:
+        denominator = np.linalg.norm(a) * np.linalg.norm(b)
+        if denominator == 0:
             return 0.0
-        return float(np.dot(a, b) / denom)
+        return max(0.0, min(1.0, float(np.dot(a, b) / denominator)))
 
+    # Public compatibility helpers used by existing scripts.
     def check_saved_job_updates(self, user: User) -> int:
-        """Saved Job Updates — notify if any saved job has been re-posted
-        or a very similar job appears in the database.
-
-        Checks each saved job for near-duplicates added recently.
-        """
-        from app.models.recommendation import SavedJob
-        from app.services.search import find_similar_jobs
-        import uuid
-
         profile = self.db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
-        if not profile:
+        prefs = self.db.query(NotificationPreference).filter(NotificationPreference.user_id == user.id).first()
+        candidates = self._saved_job_candidates(user)
+        if not profile or not prefs or not candidates:
             return 0
-
-        saved = self.db.query(SavedJob).filter(SavedJob.user_id == user.id).all()
-        if not saved:
-            return 0
-
-        alerts = []
-        for saved_job in saved:
-            similar = find_similar_jobs(self.db, str(saved_job.job_id), limit=3)
-            for s in similar:
-                if s["similarity"] >= 0.85:
-                    already = self.db.query(Notification).filter(
-                        Notification.user_id == user.id,
-                        Notification.job_id == s["id"],
-                        Notification.type == "saved_job_update",
-                    ).first()
-                    if not already:
-                        alerts.append(s)
-
-        if not alerts:
-            return 0
-
-        for alert in alerts[:MAX_NOTIFICATIONS_PER_RUN]:
-            self.db.add(Notification(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                job_id=uuid.UUID(alert["id"]),
-                type="saved_job_update",
-                match_score=alert["similarity"],
-            ))
-
-        self.db.commit()
-        logger.info(f"{len(alerts[:MAX_NOTIFICATIONS_PER_RUN])} saved job update(s) for {user.email}")
-        return 1
+        return int(self._deliver(user, profile, prefs, candidates)["delivered"])
 
     def check_recommendation_updates(self, user: User) -> int:
-        """Recommendation Updates — notify if the user's top recommendation
-        has changed since the last notification cycle.
-
-        Compares current top-1 recommendation against the last stored one.
-        """
-        from app.models.recommendation import Recommendation
-        from app.agents.recommendation_agent import RecommendationAgent
-        import uuid
-
         profile = self.db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
-        if not profile or profile.profile_embedding is None:
+        prefs = self.db.query(NotificationPreference).filter(NotificationPreference.user_id == user.id).first()
+        candidate = self._recommendation_candidate(user)
+        if not profile or not prefs or not candidate:
             return 0
-
-        # Get current top recommendation
-        agent = RecommendationAgent(self.db)
-        current_recs = agent.recommend(profile, top_n=1)
-        if not current_recs:
-            return 0
-
-        current_top_id = current_recs[0]["job_id"]
-
-        # Check if we already notified about this specific top recommendation
-        already = self.db.query(Notification).filter(
-            Notification.user_id == user.id,
-            Notification.job_id == current_top_id,
-            Notification.type == "recommendation_update",
-        ).first()
-
-        if already:
-            return 0  # Same top rec as before, no update needed
-
-        self.db.add(Notification(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            job_id=uuid.UUID(current_top_id),
-            type="recommendation_update",
-            match_score=current_recs[0]["match_percentage"] / 100,
-        ))
-        self.db.commit()
-        logger.info(f"New top recommendation for {user.email}: "
-              f"{current_recs[0]['title']} ({current_recs[0]['match_percentage']}%)")
-        return 1
+        return int(self._deliver(user, profile, prefs, [candidate])["delivered"])

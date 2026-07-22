@@ -1,10 +1,13 @@
 """Jobs API — search and filtering endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.search import semantic_search, hybrid_search, keyword_search, find_similar_jobs, evidence_search
+from app.services.search import semantic_search, hybrid_search, keyword_search, find_similar_jobs, evidence_search, personalized_search
+from app.core.deps import get_optional_current_user
+from app.models.user import User, UserProfile
+from app.config import get_settings
 
 router = APIRouter()
 
@@ -56,13 +59,27 @@ def search_hybrid(
     category: str | None = Query(None, description="Filter by canonical category"),
     min_salary: float | None = Query(None),
     limit: int = Query(10, ge=1, le=50),
+    recommended: bool = Query(False, description="Rank using the authenticated user's profile"),
+    user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """Semantic search combined with structured filters."""
-    results = hybrid_search(
-        db, query=q, location_country=country, remote_only=remote_only,
-        category=category, min_salary=min_salary, limit=limit,
-    )
+    if recommended:
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication is required for recommended search")
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
+        if not profile or profile.profile_embedding is None or (not profile.skills and not profile.headline):
+            raise HTTPException(status_code=422, detail="Complete your profile before using recommended search")
+        results = personalized_search(
+            db, q, profile, location_country=country, remote_only=remote_only,
+            category=category, min_salary=min_salary,
+            threshold=get_settings().recommended_search_threshold, limit=limit,
+        )
+    else:
+        results = hybrid_search(
+            db, query=q, location_country=country, remote_only=remote_only,
+            category=category, min_salary=min_salary, limit=limit,
+        )
     return {"query": q, "count": len(results), "results": results}
 
 
